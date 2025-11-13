@@ -8,8 +8,8 @@ import { Header } from "@/components/reusables";
 import { SchedulerInit } from "@/components/investors/scheduler-init";
 
 export const metadata: Metadata = {
-	title: "Angel Investors Directory | AI-Powered Investor Discovery",
-	description: "Discover angel investors, their interests, and how to reach out. Automatically updated every 5 minutes with AI-powered data extraction.",
+	title: "AI Investor Finder | Find Perfect Angel Investors for Your Startup",
+	description: "AI-powered investor discovery platform. Describe your startup and find matching angel investors instantly. Real-time data, smart matching, beautiful interface.",
 };
 
 export const viewport: Viewport = {
@@ -41,8 +41,7 @@ export default function RootLayout({
 						easing="ease"
 					/>
 					<SchedulerInit />
-					<Header />
-					<MaxWidthWrapper>{children}</MaxWidthWrapper>
+					{children}
 
 					<Toaster
 						position="top-right"
