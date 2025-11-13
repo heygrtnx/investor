@@ -10,6 +10,7 @@ export interface ScrapeProgress {
 	totalUrls?: number;
 	investorsFound?: number;
 	progress?: number; // 0-100
+	rawResponse?: string; // AI raw response
 }
 
 // Set progress

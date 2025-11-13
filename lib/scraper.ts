@@ -409,22 +409,44 @@ export async function scrapeInvestors(query?: string): Promise<ScrapedInvestorDa
 		});
 
 		// Search for investors directly using OpenAI
-		const investors = await searchInvestorsWithOpenAI(query);
+		const searchResult = await searchInvestorsWithOpenAI(query);
+		const investors = searchResult.investors;
+		const aiRawResponse = searchResult.rawResponse;
 
-		// Update progress
-		await setProgress({
-			stage: "compiling",
-			message: getProgressMessageWithContext("compiling", investors.length, queryHash),
-			investorsFound: investors.length,
-			progress: 60,
-		});
+		// Store raw response in progress tracker for API access
+		if (aiRawResponse) {
+			await setProgress({
+				stage: "compiling",
+				message: getProgressMessageWithContext("compiling", investors.length, queryHash),
+				investorsFound: investors.length,
+				progress: 60,
+				rawResponse: aiRawResponse, // Store in progress for retrieval
+			});
+		} else {
+			await setProgress({
+				stage: "compiling",
+				message: getProgressMessageWithContext("compiling", investors.length, queryHash),
+				investorsFound: investors.length,
+				progress: 60,
+			});
+		}
 
-		// Remove duplicates based on name
+		// Remove duplicates based on normalized name (case-insensitive)
 		const uniqueInvestors = new Map<string, ScrapedInvestorData>();
 		investors.forEach((investor) => {
-			const key = investor.name.toLowerCase().trim();
-			if (!uniqueInvestors.has(key) && investor.name.length > 2) {
-				uniqueInvestors.set(key, investor);
+			const normalizedName = investor.name.toLowerCase().trim();
+			if (normalizedName.length > 2) {
+				if (!uniqueInvestors.has(normalizedName)) {
+					uniqueInvestors.set(normalizedName, investor);
+				} else {
+					// If duplicate found, prefer the one with more complete data
+					const existing = uniqueInvestors.get(normalizedName)!;
+					const existingCompleteness = (existing.bio?.length || 0) + (existing.fullBio?.length || 0) + (existing.contactInfo ? Object.keys(existing.contactInfo).length : 0);
+					const newCompleteness = (investor.bio?.length || 0) + (investor.fullBio?.length || 0) + (investor.contactInfo ? Object.keys(investor.contactInfo).length : 0);
+					if (newCompleteness > existingCompleteness) {
+						uniqueInvestors.set(normalizedName, investor);
+					}
+				}
 			}
 		});
 
@@ -435,13 +457,33 @@ export async function scrapeInvestors(query?: string): Promise<ScrapedInvestorDa
 			message: getProgressMessageWithContext("almost_done", finalInvestors.length, queryHash),
 			investorsFound: finalInvestors.length,
 			progress: 90,
+			rawResponse: aiRawResponse, // Preserve raw response
 		});
 
 		// Small delay before clearing to ensure frontend sees the progress
 		await new Promise((resolve) => setTimeout(resolve, 500));
 
+		// Store raw response before clearing progress
+		const { getProgress } = await import("./progress-tracker");
+		const finalProgress = await getProgress();
+		const storedRawResponse = finalProgress?.rawResponse;
+
 		// Clear progress on completion
 		await clearProgress();
+
+		// Return investors with raw response metadata
+		// Store in a temporary key for API retrieval
+		if (storedRawResponse && query) {
+			const { getRedisClient } = await import("./redis");
+			const client = getRedisClient();
+			if (client) {
+				try {
+					await client.setex(`ai:response:${query.toLowerCase().trim()}`, 300, storedRawResponse);
+				} catch {
+					// Silent fail
+				}
+			}
+		}
 
 		return finalInvestors;
 	} catch (error: any) {

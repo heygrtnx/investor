@@ -13,6 +13,16 @@ interface InvestorCardProps {
 export function InvestorCard({ investor, index = 0 }: InvestorCardProps) {
 	const router = useRouter();
 
+	const handleClick = () => {
+		// Store investor data in sessionStorage for instant loading on profile page
+		try {
+			sessionStorage.setItem(`investor_${investor.id}`, JSON.stringify(investor));
+		} catch (error) {
+			// Silent fail if sessionStorage is not available
+		}
+		router.push(`/investor/${investor.id}`);
+	};
+
 	return (
 		<motion.div
 			initial={{ opacity: 0, y: 50 }}
@@ -20,7 +30,7 @@ export function InvestorCard({ investor, index = 0 }: InvestorCardProps) {
 			transition={{ duration: 0.5, delay: index * 0.1 }}
 			whileHover={{ y: -8, scale: 1.02 }}
 			className="h-full group cursor-pointer"
-			onClick={() => router.push(`/investor/${investor.id}`)}>
+			onClick={handleClick}>
 			{/* Liquid glass card */}
 			<div className="relative h-full">
 				{/* Glow effect on hover */}

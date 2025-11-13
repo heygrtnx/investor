@@ -35,9 +35,15 @@ export function InvestorProfile({ investor: initialInvestor }: InvestorProfilePr
 	const router = useRouter();
 	const [isEnriching, setIsEnriching] = useState(false);
 
-	// Use SWR to fetch fresh data (only if online)
+	// Use SWR to fetch fresh data (only if online and we don't have complete data)
+	// Skip fetch if we already have complete profile data to avoid unnecessary loading
+	const hasCompleteData = initialInvestor.fullBio && 
+		initialInvestor.profile &&
+		initialInvestor.profile.investmentStage &&
+		initialInvestor.profile.checkSize;
+	
 	const { data, error, isLoading, mutate } = useSWR<Investor>(
-		navigator.onLine ? `/api/investor/${initialInvestor.id}` : null,
+		navigator.onLine && !hasCompleteData ? `/api/investor/${initialInvestor.id}` : null,
 		fetcher,
 		{
 			fallbackData: initialInvestor,

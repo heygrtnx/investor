@@ -10,6 +10,7 @@ import { InvestorList } from "@/components/investors";
 import { Investor } from "@/lib/db";
 import { Button } from "@heroui/react";
 import { fetcher } from "@/lib/fetcher";
+import { AIResponseViewer } from "./ai-response-viewer";
 
 interface SearchResultsProps {
 	query: string;
@@ -40,6 +41,7 @@ export function SearchResults({ query }: SearchResultsProps) {
 		total: number;
 		cached?: boolean;
 		updating?: boolean;
+		aiResponse?: string;
 	}>(
 		query && navigator.onLine ? `/api/search?q=${encodeURIComponent(query)}` : null,
 		fetcher,
@@ -227,6 +229,7 @@ export function SearchResults({ query }: SearchResultsProps) {
 								<p className="text-white/80 text-sm">
 									<span className="font-semibold">Query:</span> {query}
 								</p>
+								<AIResponseViewer aiResponse={data?.aiResponse} />
 							</div>
 						)}
 					</div>
@@ -334,6 +337,7 @@ export function SearchResults({ query }: SearchResultsProps) {
 										Found <span className="font-bold text-white">{investors.length}</span>{" "}
 										matching investors
 									</p>
+									<AIResponseViewer aiResponse={data?.aiResponse} />
 								</div>
 								<InvestorList investors={investors} />
 							</>

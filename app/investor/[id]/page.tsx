@@ -1,29 +1,107 @@
+"use client";
+
 import { InvestorProfile } from "@/components/investors/investor-profile";
-import { getInvestorById } from "@/lib/db";
-import { getCachedInvestors } from "@/lib/redis";
-import { notFound } from "next/navigation";
+import { Investor } from "@/lib/db";
+import { useEffect, useState } from "react";
+import { useParams } from "next/navigation";
+import useSWR from "swr";
+import { fetcher } from "@/lib/fetcher";
 
-export default async function InvestorPage({
-	params,
-}: {
-	params: Promise<{ id: string }>;
-}) {
-	const { id } = await params;
+export default function InvestorPage() {
+	const params = useParams();
+	const id = params?.id as string;
+	const [investor, setInvestor] = useState<Investor | null>(null);
+	const [isLoading, setIsLoading] = useState(true);
 
-	// Try cache first
-	let investor = null;
-	const cachedInvestors = await getCachedInvestors();
-	if (cachedInvestors && Array.isArray(cachedInvestors)) {
-		investor = cachedInvestors.find((inv: any) => inv.id === id);
+	// Check sessionStorage first for instant loading
+	useEffect(() => {
+		if (!id) return;
+
+		try {
+			const storedInvestor = sessionStorage.getItem(`investor_${id}`);
+			if (storedInvestor) {
+				const parsedInvestor = JSON.parse(storedInvestor);
+				setInvestor(parsedInvestor);
+				setIsLoading(false);
+				return;
+			}
+		} catch (error) {
+			// Silent fail if sessionStorage is not available
+		}
+
+		// If not in sessionStorage, fetch from API
+		setIsLoading(true);
+	}, [id]);
+
+	// Use SWR to fetch investor data if not in sessionStorage
+	const { data: fetchedInvestor, error } = useSWR<Investor>(
+		!investor && id ? `/api/investor/${id}` : null,
+		fetcher,
+		{
+			revalidateOnFocus: false,
+			onSuccess: (data) => {
+				if (data) {
+					setInvestor(data);
+					setIsLoading(false);
+					// Store in sessionStorage for future navigation
+					try {
+						sessionStorage.setItem(`investor_${id}`, JSON.stringify(data));
+					} catch (error) {
+						// Silent fail
+					}
+				}
+			},
+			onError: () => {
+				setIsLoading(false);
+			},
+		}
+	);
+
+	// Update investor if SWR fetched it
+	useEffect(() => {
+		if (fetchedInvestor && !investor) {
+			setInvestor(fetchedInvestor);
+			setIsLoading(false);
+		}
+	}, [fetchedInvestor, investor]);
+
+	if (!id) {
+		return null;
 	}
 
-	// Fallback to database
-	if (!investor) {
-		investor = getInvestorById(id);
+	if (isLoading && !investor) {
+		// Show minimal loading state only if we don't have cached data
+		return (
+			<div className="min-h-screen bg-gradient-to-br from-black via-gray-900 to-black dark:from-black dark:via-gray-950 dark:to-black overflow-x-hidden">
+				<div className="fixed inset-0 overflow-hidden pointer-events-none">
+					<div className="absolute top-0 left-1/4 w-96 h-96 bg-white/5 rounded-full blur-3xl animate-pulse" />
+					<div
+						className="absolute bottom-0 right-1/4 w-96 h-96 bg-white/5 rounded-full blur-3xl animate-pulse"
+						style={{ animationDelay: "1s" }}
+					/>
+				</div>
+				<div className="relative z-10 flex items-center justify-center min-h-screen">
+					<div className="text-white/60">Loading...</div>
+				</div>
+			</div>
+		);
 	}
 
 	if (!investor) {
-		notFound();
+		return (
+			<div className="min-h-screen bg-gradient-to-br from-black via-gray-900 to-black dark:from-black dark:via-gray-950 dark:to-black overflow-x-hidden">
+				<div className="fixed inset-0 overflow-hidden pointer-events-none">
+					<div className="absolute top-0 left-1/4 w-96 h-96 bg-white/5 rounded-full blur-3xl animate-pulse" />
+					<div
+						className="absolute bottom-0 right-1/4 w-96 h-96 bg-white/5 rounded-full blur-3xl animate-pulse"
+						style={{ animationDelay: "1s" }}
+					/>
+				</div>
+				<div className="relative z-10 flex items-center justify-center min-h-screen">
+					<div className="text-white/60">Investor not found</div>
+				</div>
+			</div>
+		);
 	}
 
 	return (

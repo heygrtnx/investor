@@ -22,9 +22,9 @@ interface OpenAIInvestorData extends ScrapedInvestorData {
 }
 
 // Search for investors directly using OpenAI
-export async function searchInvestorsWithOpenAI(query: string): Promise<ScrapedInvestorData[]> {
+export async function searchInvestorsWithOpenAI(query: string): Promise<{ investors: ScrapedInvestorData[]; rawResponse?: string }> {
 	if (!openai) {
-		return [];
+		return { investors: [], rawResponse: undefined };
 	}
 
 	try {
@@ -150,10 +150,13 @@ Ensure every investor has ALL required fields filled with detailed, specific inf
 		}).filter((inv: OpenAIInvestorData) => inv.name && inv.name !== "Unknown");
 
 		console.log(`✓ Extracted ${scrapedInvestors.length} investors from OpenAI response`);
-		return scrapedInvestors as ScrapedInvestorData[];
+		return {
+			investors: scrapedInvestors as ScrapedInvestorData[],
+			rawResponse: aiResponse,
+		};
 	} catch (error: any) {
 		console.error("Error in searchInvestorsWithOpenAI:", error.message);
-		return [];
+		return { investors: [], rawResponse: undefined };
 	}
 }
 
