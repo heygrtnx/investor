@@ -93,25 +93,126 @@ async function matchInvestorsWithAI(investors: Investor[], query: string): Promi
 	}
 }
 
+// Cache query results in Redis (query-based cache)
+async function getCachedQueryResults(query: string): Promise<Investor[] | null> {
+	const { getRedisClient } = await import('@/lib/redis');
+	const client = getRedisClient();
+	if (!client) return null;
+
+	try {
+		const queryKey = `search:${query.toLowerCase().trim()}`;
+		const data = await client.get(queryKey);
+		return data ? JSON.parse(data) : null;
+	} catch (error: any) {
+		return null;
+	}
+}
+
+async function setCachedQueryResults(query: string, investors: Investor[]): Promise<void> {
+	const { getRedisClient } = await import('@/lib/redis');
+	const client = getRedisClient();
+	if (!client) return;
+
+	try {
+		const queryKey = `search:${query.toLowerCase().trim()}`;
+		// Cache for 1 hour
+		await client.setex(queryKey, 3600, JSON.stringify(investors));
+	} catch (error: any) {
+		// Silent fail
+	}
+}
+
 export async function GET(request: Request) {
 	const { searchParams } = new URL(request.url);
 	const query = searchParams.get('q') || '';
 
 	if (!query) {
-		return NextResponse.json({ investors: [], query, total: 0 });
+		return NextResponse.json({ investors: [], query, total: 0, cached: false });
 	}
 
 	try {
-		// Run scraping job with query context - only use freshly scraped data
-		const allInvestors = await runScrapingJob(query);
+		// FAST PATH: Check cache first - return immediately if found
+		const cachedResults = await getCachedQueryResults(query);
+		if (cachedResults && cachedResults.length > 0) {
+			console.log(`⚡ Cache hit for query: "${query}" - returning ${cachedResults.length} investors instantly`);
+			return NextResponse.json({
+				investors: cachedResults.slice(0, 50),
+				query,
+				total: cachedResults.length,
+				cached: true,
+			}, {
+				headers: {
+					'Cache-Control': 'public, max-age=3600, stale-while-revalidate=86400',
+				},
+			});
+		}
 
-		// If no investors were scraped, return empty array (don't show error)
+		// Get all cached investors for fast matching
+		const allCachedInvestors = await getCachedInvestors<Investor[]>();
+		if (allCachedInvestors && allCachedInvestors.length > 0) {
+			// Fast keyword matching on cached data
+			const matchedInvestors = matchInvestorsByKeywords(allCachedInvestors, query);
+			if (matchedInvestors.length > 0) {
+				console.log(`⚡ Fast match from cache: "${query}" - returning ${matchedInvestors.length} investors`);
+				// Cache the query result for next time
+				setCachedQueryResults(query, matchedInvestors).catch(() => {});
+				return NextResponse.json({
+					investors: matchedInvestors.slice(0, 50),
+					query,
+					total: matchedInvestors.length,
+					cached: true,
+				}, {
+					headers: {
+						'Cache-Control': 'public, max-age=3600, stale-while-revalidate=86400',
+					},
+				});
+			}
+		}
+
+		// SLOW PATH: Run scraping job in background, but return cached if available
+		// Start scraping job (non-blocking)
+		const scrapingPromise = runScrapingJob(query).then(async (allInvestors) => {
+			if (allInvestors.length > 0) {
+				// Match and cache results
+				const matchedInvestors = await matchInvestorsWithAI(allInvestors, query);
+				await setCachedQueryResults(query, matchedInvestors);
+				return matchedInvestors;
+			}
+			return [];
+		}).catch(() => []);
+
+		// If we have any cached investors, return them immediately while scraping continues
+		if (allCachedInvestors && allCachedInvestors.length > 0) {
+			const quickMatch = matchInvestorsByKeywords(allCachedInvestors, query);
+			if (quickMatch.length > 0) {
+				// Return cached results immediately, update in background
+				scrapingPromise.then(() => {
+					console.log(`✓ Background scraping completed for: "${query}"`);
+				});
+				return NextResponse.json({
+					investors: quickMatch.slice(0, 50),
+					query,
+					total: quickMatch.length,
+					cached: true,
+					updating: true, // Indicate results are being updated
+				}, {
+					headers: {
+						'Cache-Control': 'public, max-age=3600, stale-while-revalidate=86400',
+					},
+				});
+			}
+		}
+
+		// No cache available, wait for scraping (but this should be rare)
+		const allInvestors = await scrapingPromise;
+
 		if (allInvestors.length === 0) {
 			console.warn(`⚠ No investors found for query: "${query}"`);
 			return NextResponse.json({
 				investors: [],
 				query,
 				total: 0,
+				cached: false,
 			});
 		}
 
@@ -122,10 +223,18 @@ export async function GET(request: Request) {
 
 		console.log(`✓ Matched ${matchedInvestors.length} investors for query: "${query}"`);
 
+		// Cache the results
+		await setCachedQueryResults(query, matchedInvestors);
+
 		return NextResponse.json({
-			investors: matchedInvestors.slice(0, 50), // Limit to top 50 results
+			investors: matchedInvestors.slice(0, 50),
 			query,
 			total: matchedInvestors.length,
+			cached: false,
+		}, {
+			headers: {
+				'Cache-Control': 'public, max-age=3600, stale-while-revalidate=86400',
+			},
 		});
 	} catch (error: any) {
 		// Log error but don't expose to frontend
@@ -134,6 +243,7 @@ export async function GET(request: Request) {
 			investors: [],
 			query,
 			total: 0,
+			cached: false,
 		});
 	}
 }

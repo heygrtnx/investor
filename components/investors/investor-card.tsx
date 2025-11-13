@@ -3,6 +3,7 @@
 import { motion } from 'framer-motion';
 import { Investor } from '@/lib/db';
 import { Mail, Linkedin, Twitter, Globe, MapPin, Sparkles } from 'lucide-react';
+import { useRouter } from 'next/navigation';
 
 interface InvestorCardProps {
 	investor: Investor;
@@ -10,13 +11,16 @@ interface InvestorCardProps {
 }
 
 export function InvestorCard({ investor, index = 0 }: InvestorCardProps) {
+	const router = useRouter();
+
 	return (
 		<motion.div
 			initial={{ opacity: 0, y: 50 }}
 			animate={{ opacity: 1, y: 0 }}
 			transition={{ duration: 0.5, delay: index * 0.1 }}
 			whileHover={{ y: -8, scale: 1.02 }}
-			className="h-full group">
+			className="h-full group cursor-pointer"
+			onClick={() => router.push(`/investor/${investor.id}`)}>
 			{/* Liquid glass card */}
 			<div className="relative h-full">
 				{/* Glow effect on hover */}
@@ -24,15 +28,55 @@ export function InvestorCard({ investor, index = 0 }: InvestorCardProps) {
 				
 				{/* Main card */}
 				<div className="relative bg-white/10 dark:bg-gray-900/20 backdrop-blur-2xl rounded-3xl border border-white/20 dark:border-white/10 p-6 h-full shadow-2xl transition-all duration-300 group-hover:border-white/30">
-					{/* Header */}
-					<div className="mb-4">
-						<h3 className="text-xl font-bold text-white mb-2">{investor.name}</h3>
-						{investor.location && (
-							<div className="flex items-center gap-2 text-sm text-white/70">
-								<MapPin className="w-4 h-4" />
-								{investor.location}
+					{/* Header with Image */}
+					<div className="mb-4 flex items-start gap-4">
+						{/* Profile Image */}
+						{investor.image ? (
+							<div className="flex-shrink-0">
+								<img
+									src={investor.image}
+									alt={investor.name}
+									className="w-16 h-16 rounded-2xl object-cover border-2 border-white/20"
+									onError={(e) => {
+										// Fallback to initials if image fails to load
+										const target = e.target as HTMLImageElement;
+										target.style.display = 'none';
+										if (target.nextElementSibling) {
+											(target.nextElementSibling as HTMLElement).style.display = 'flex';
+										}
+									}}
+								/>
+								<div
+									className="w-16 h-16 rounded-2xl bg-white/10 border-2 border-white/20 flex items-center justify-center text-white font-bold text-lg hidden"
+									style={{ display: 'none' }}>
+									{investor.name
+										.split(' ')
+										.map((n) => n[0])
+										.join('')
+										.toUpperCase()
+										.slice(0, 2)}
+								</div>
+							</div>
+						) : (
+							<div className="w-16 h-16 rounded-2xl bg-white/10 border-2 border-white/20 flex items-center justify-center text-white font-bold text-lg flex-shrink-0">
+								{investor.name
+									.split(' ')
+									.map((n) => n[0])
+									.join('')
+									.toUpperCase()
+									.slice(0, 2)}
 							</div>
 						)}
+						
+						<div className="flex-1 min-w-0">
+							<h3 className="text-xl font-bold text-white mb-2">{investor.name}</h3>
+							{investor.location && (
+								<div className="flex items-center gap-2 text-sm text-white/70">
+									<MapPin className="w-4 h-4" />
+									{investor.location}
+								</div>
+							)}
+						</div>
 					</div>
 
 					{/* Bio */}

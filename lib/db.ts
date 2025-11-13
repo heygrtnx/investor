@@ -5,7 +5,9 @@ export interface Investor {
 	id: string;
 	name: string;
 	bio?: string;
+	fullBio?: string; // Extended bio
 	location?: string;
+	image?: string; // Profile image URL
 	interests: string[];
 	contactInfo: {
 		email?: string;
@@ -13,6 +15,22 @@ export interface Investor {
 		twitter?: string;
 		website?: string;
 		other?: string[];
+	};
+	// Detailed profile information
+	profile?: {
+		investmentStage?: string[]; // e.g., ["Seed", "Series A", "Series B"]
+		checkSize?: string; // e.g., "$50K - $500K"
+		geographicFocus?: string[]; // e.g., ["US", "Europe", "Global"]
+		portfolio?: string[]; // Past investments/portfolio companies
+		investmentPhilosophy?: string; // Investment style/philosophy
+		fundingSource?: string; // Where the capital comes from
+		exitExpectations?: string; // Exit strategy expectations
+		decisionProcess?: string; // How decisions are made
+		decisionSpeed?: string; // Typical decision timeline
+		reputation?: string; // Reputation and network info
+		network?: string; // Network connections
+		tractionRequired?: string; // Typical traction/metrics required
+		boardParticipation?: string; // Board participation preferences
 	};
 	source: string;
 	scrapedAt: string;

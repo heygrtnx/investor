@@ -4,10 +4,12 @@ import { useEffect, useState, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { ArrowLeft, Sparkles, SearchX, RefreshCw, Search, Globe, FileText, CheckCircle } from "lucide-react";
 import { useRouter } from "next/navigation";
+import useSWR from "swr";
 import { InvestorListSkeleton } from "@/components/ui/investor-skeleton";
 import { InvestorList } from "@/components/investors";
 import { Investor } from "@/lib/db";
 import { Button } from "@heroui/react";
+import { fetcher } from "@/lib/fetcher";
 
 interface SearchResultsProps {
 	query: string;
@@ -25,16 +27,109 @@ interface Progress {
 
 export function SearchResults({ query }: SearchResultsProps) {
 	const [investors, setInvestors] = useState<Investor[]>([]);
-	const [isLoading, setIsLoading] = useState(true);
 	const [progress, setProgress] = useState<Progress | null>(null);
 	const [isLongRunning, setIsLongRunning] = useState(false);
 	const progressIntervalRef = useRef<NodeJS.Timeout | null>(null);
 	const longRunningTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 	const router = useRouter();
 
+	// Use SWR for data fetching with caching and revalidation
+	const { data, error, isLoading, mutate } = useSWR<{
+		investors: Investor[];
+		query: string;
+		total: number;
+		cached?: boolean;
+		updating?: boolean;
+	}>(
+		query && navigator.onLine ? `/api/search?q=${encodeURIComponent(query)}` : null,
+		fetcher,
+		{
+			revalidateOnFocus: false,
+			revalidateOnReconnect: true,
+			dedupingInterval: 2000, // Dedupe requests within 2 seconds
+			onSuccess: async (data) => {
+				// Save to offline storage
+				if (data.investors && data.investors.length > 0) {
+					try {
+						const { saveSearchResults } = await import("@/lib/offline-storage");
+						await saveSearchResults(query, data.investors);
+					} catch (error) {
+						// Silent fail
+					}
+				}
+				setInvestors(data.investors || []);
+			},
+			onError: async () => {
+				// On error, try offline storage
+				try {
+					const { getSearchResults } = await import("@/lib/offline-storage");
+					const offlineResults = await getSearchResults(query);
+					if (offlineResults && offlineResults.length > 0) {
+						setInvestors(offlineResults);
+					}
+				} catch (error) {
+					// Both network and offline failed
+				}
+			},
+		}
+	);
+
+	// Load from offline storage if offline
+	useEffect(() => {
+		if (query && !navigator.onLine) {
+			(async () => {
+				try {
+					const { getSearchResults } = await import("@/lib/offline-storage");
+					const offlineResults = await getSearchResults(query);
+					if (offlineResults && offlineResults.length > 0) {
+						setInvestors(offlineResults);
+					}
+				} catch (error) {
+					// IndexedDB not available
+				}
+			})();
+		}
+	}, [query]);
+
 	useEffect(() => {
 		if (query) {
-			searchInvestors(query);
+			// Check offline storage first for instant results
+			(async () => {
+				try {
+					const { getSearchResults } = await import("@/lib/offline-storage");
+					const offlineResults = await getSearchResults(query);
+					if (offlineResults && offlineResults.length > 0) {
+						setInvestors(offlineResults);
+						// If offline, don't try to fetch from network
+						if (!navigator.onLine) {
+							return;
+						}
+					}
+				} catch (error) {
+					// IndexedDB not available
+				}
+			})();
+			
+			// Only start progress polling if online
+			if (navigator.onLine) {
+				progressIntervalRef.current = setInterval(fetchProgress, 500);
+				
+				// Set timeout for long-running message
+				longRunningTimeoutRef.current = setTimeout(() => {
+					setIsLongRunning(true);
+					setProgress((prev) => {
+						if (!prev || prev.stage === "searching" || prev.stage === "discovering") {
+							return {
+								...prev,
+								stage: "compiling",
+								message: "Compiling results... this may take a while",
+								progress: prev?.progress || 50,
+							};
+						}
+						return prev;
+					});
+				}, 1000);
+			}
 		}
 		
 		return () => {
@@ -46,6 +141,13 @@ export function SearchResults({ query }: SearchResultsProps) {
 			}
 		};
 	}, [query]);
+	
+	// Update investors when SWR data changes
+	useEffect(() => {
+		if (data?.investors) {
+			setInvestors(data.investors);
+		}
+	}, [data]);
 
 	const fetchProgress = async () => {
 		try {
@@ -59,72 +161,19 @@ export function SearchResults({ query }: SearchResultsProps) {
 		}
 	};
 
-	const searchInvestors = async (searchQuery: string) => {
-		setIsLoading(true);
-		setInvestors([]); // Clear previous results
-		setIsLongRunning(false);
-		setProgress({ stage: "searching", message: "Searching...", progress: 0 });
-		
-		// Start polling for progress
-		progressIntervalRef.current = setInterval(fetchProgress, 500);
-		
-		// Set timeout to show "may take a while" message after 1 second
-		longRunningTimeoutRef.current = setTimeout(() => {
-			setIsLongRunning(true);
-			// Update progress message if still in early stages
-			setProgress((prev) => {
-				if (!prev || prev.stage === "searching" || prev.stage === "discovering") {
-					return {
-						...prev,
-						stage: "compiling",
-						message: "Compiling results... this may take a while",
-						progress: prev?.progress || 50,
-					};
+	// Clear progress when loading completes
+	useEffect(() => {
+		if (!isLoading && investors.length > 0) {
+			setTimeout(() => {
+				setIsLongRunning(false);
+				if (progressIntervalRef.current) {
+					clearInterval(progressIntervalRef.current);
+					progressIntervalRef.current = null;
 				}
-				return prev;
-			});
-		}, 1000);
-		
-		try {
-			const response = await fetch(`/api/search?q=${encodeURIComponent(searchQuery)}`);
-			
-			// Wait for response even if it takes time
-			if (!response.ok) {
-				// Don't throw - just treat as empty results
-				setInvestors([]);
-				return;
-			}
-			
-			const data = await response.json();
-			
-			// Only update investors after we have data
-			// Wait a bit to ensure progress is cleared
-			await new Promise((resolve) => setTimeout(resolve, 500));
-			
-			setInvestors(data.investors || []);
-		} catch (error) {
-			// Silently handle errors - don't show error state
-			// Just show empty results
-			setInvestors([]);
-		} finally {
-			// Clear timeout
-			if (longRunningTimeoutRef.current) {
-				clearTimeout(longRunningTimeoutRef.current);
-				longRunningTimeoutRef.current = null;
-			}
-			
-			// Wait a bit more to ensure progress is fully cleared
-			await new Promise((resolve) => setTimeout(resolve, 300));
-			
-			setIsLoading(false);
-			setIsLongRunning(false);
-			if (progressIntervalRef.current) {
-				clearInterval(progressIntervalRef.current);
-				progressIntervalRef.current = null;
-			}
-			setProgress(null);
+				setProgress(null);
+			}, 300);
 		}
-	};
+	}, [isLoading, investors.length]);
 
 	const getProgressIcon = () => {
 		switch (progress?.stage) {
@@ -329,7 +378,7 @@ export function SearchResults({ query }: SearchResultsProps) {
 											transition={{ delay: 0.5 }}
 											className="flex flex-col sm:flex-row gap-3 justify-center">
 											<Button
-												onClick={() => searchInvestors(query)}
+												onClick={() => mutate()}
 												startContent={<RefreshCw className="w-4 h-4" />}
 												className="bg-white/10 hover:bg-white/20 text-white border border-white/20 backdrop-blur-xl">
 												Try Again

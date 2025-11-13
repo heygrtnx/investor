@@ -175,16 +175,42 @@ export async function runScrapingJob(query?: string): Promise<Investor[]> {
 			// Check if this investor already exists
 			const existingInvestor = existingInvestorsMap.get(id);
 
+			// Get profile data from scraped data
+			const profileData = (data as any)._profile || {};
+
 			if (existingInvestor) {
 				// Merge/update existing investor with new data - accumulate information
+				// Prefer new data if it's more complete
 				const updatedInvestor: Investor = {
 					...existingInvestor,
 					// Merge bio if new one is longer or more detailed
 					bio: data.bio && (!existingInvestor.bio || data.bio.length > existingInvestor.bio.length) ? data.bio : existingInvestor.bio,
+					// Merge fullBio - prefer new one if it's longer or more detailed
+					fullBio: data.fullBio && (!existingInvestor.fullBio || data.fullBio.length > existingInvestor.fullBio.length) ? data.fullBio : existingInvestor.fullBio,
 					// Merge location if new one exists
 					location: data.location || existingInvestor.location,
+					// Merge image - prefer new image if available
+					image: data.image || existingInvestor.image,
 					// Merge interests - combine unique interests
 					interests: interests.length > 0 ? [...new Set([...existingInvestor.interests, ...interests])] : existingInvestor.interests,
+					// Merge profile - prefer new profile data if it's more complete
+					profile: Object.keys(profileData).length > 0 ? {
+						...existingInvestor.profile,
+						// Only update fields if new data is provided and not empty
+						investmentStage: profileData.investmentStage && profileData.investmentStage.length > 0 ? profileData.investmentStage : existingInvestor.profile?.investmentStage,
+						checkSize: profileData.checkSize || existingInvestor.profile?.checkSize,
+						geographicFocus: profileData.geographicFocus && profileData.geographicFocus.length > 0 ? profileData.geographicFocus : existingInvestor.profile?.geographicFocus,
+						portfolio: profileData.portfolio && profileData.portfolio.length > 0 ? profileData.portfolio : existingInvestor.profile?.portfolio,
+						investmentPhilosophy: profileData.investmentPhilosophy || existingInvestor.profile?.investmentPhilosophy,
+						fundingSource: profileData.fundingSource || existingInvestor.profile?.fundingSource,
+						exitExpectations: profileData.exitExpectations || existingInvestor.profile?.exitExpectations,
+						decisionProcess: profileData.decisionProcess || existingInvestor.profile?.decisionProcess,
+						decisionSpeed: profileData.decisionSpeed || existingInvestor.profile?.decisionSpeed,
+						reputation: profileData.reputation || existingInvestor.profile?.reputation,
+						network: profileData.network || existingInvestor.profile?.network,
+						tractionRequired: profileData.tractionRequired || existingInvestor.profile?.tractionRequired,
+						boardParticipation: profileData.boardParticipation || existingInvestor.profile?.boardParticipation,
+					} : existingInvestor.profile,
 					// Merge contact info - prefer new data if available
 					contactInfo: {
 						email: data.contactInfo?.email || existingInvestor.contactInfo?.email,
@@ -203,8 +229,26 @@ export async function runScrapingJob(query?: string): Promise<Investor[]> {
 					id,
 					name: data.name,
 					bio: data.bio,
+					fullBio: data.fullBio,
 					location: data.location,
+					image: data.image,
 					interests,
+					// Always include profile if profileData exists and has content
+					profile: Object.keys(profileData).length > 0 ? {
+						investmentStage: profileData.investmentStage,
+						checkSize: profileData.checkSize,
+						geographicFocus: profileData.geographicFocus,
+						portfolio: profileData.portfolio,
+						investmentPhilosophy: profileData.investmentPhilosophy,
+						fundingSource: profileData.fundingSource,
+						exitExpectations: profileData.exitExpectations,
+						decisionProcess: profileData.decisionProcess,
+						decisionSpeed: profileData.decisionSpeed,
+						reputation: profileData.reputation,
+						network: profileData.network,
+						tractionRequired: profileData.tractionRequired,
+						boardParticipation: profileData.boardParticipation,
+					} : undefined,
 					contactInfo: {
 						email: data.contactInfo?.email,
 						linkedin: data.contactInfo?.linkedin,

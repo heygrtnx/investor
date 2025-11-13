@@ -4,7 +4,9 @@ import * as cheerio from "cheerio";
 export interface ScrapedInvestorData {
 	name: string;
 	bio?: string;
+	fullBio?: string;
 	location?: string;
+	image?: string; // Profile image URL
 	rawText: string;
 	source: string;
 	contactInfo?: {
@@ -13,6 +15,7 @@ export interface ScrapedInvestorData {
 		twitter?: string;
 		website?: string;
 	};
+	_profile?: any; // Detailed profile data
 }
 
 // Get Crawl4AI API URL from environment

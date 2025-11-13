@@ -121,7 +121,28 @@
 	* {
 		@apply border-border outline-ring/50;
 	}
+	html {
+		overflow-x: hidden;
+		overscroll-behavior: none;
+		-webkit-overflow-scrolling: touch;
+		scrollbar-width: none; /* Firefox */
+	}
 	body {
 		@apply bg-background text-foreground;
+		overflow-x: hidden;
+		overscroll-behavior: none;
+		overscroll-behavior-y: none;
+		-webkit-overflow-scrolling: touch;
+	}
+	/* Hide scrollbar but keep functionality */
+	::-webkit-scrollbar {
+		width: 0px;
+		background: transparent;
+	}
+	::-webkit-scrollbar-track {
+		background: transparent;
+	}
+	::-webkit-scrollbar-thumb {
+		background: transparent;
 	}
 }

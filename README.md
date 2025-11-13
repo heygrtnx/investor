@@ -1,144 +1,315 @@
-# Angel Investors Directory
+# AI Investor Finder
 
-A modern AI-powered website that automatically scrapes the internet for angel investors every 5 minutes, extracts their information, interests, and contact details using AI.
+A modern, AI-powered platform that helps startups find the perfect angel investors and venture capitalists. Simply describe your startup, and the AI will find matching investors with complete profiles, investment details, and contact information.
 
-## Features
+## ✨ Features
 
-- 🤖 **AI-Powered Extraction**: Uses OpenAI (or fallback keyword matching) to extract investment interests from scraped data
-- 🔄 **Automatic Updates**: Runs scraping jobs every 5 minutes automatically
-- 📊 **Modern UI**: Beautiful, responsive interface displaying investor cards with:
-  - Investor name and location
-  - Bio and background information
-  - Investment interests (extracted using AI)
-  - Contact information (email, LinkedIn, Twitter, website)
-- 🎯 **Smart Scraping**: Scrapes multiple sources including Crunchbase, AngelList, and more
-- 💾 **Local Storage**: Stores investor data in JSON format (easily upgradeable to a database)
+### 🔍 **AI-Powered Search**
+- **Natural Language Queries**: Describe your startup in plain English (e.g., "I want angel investors for my SaaS startup")
+- **Smart Matching**: Uses OpenAI GPT-4o-mini to find relevant investors based on your query
+- **Complete Profiles**: Every investor comes with comprehensive information from the first search
 
-## Tech Stack
+### 📊 **Detailed Investor Profiles**
+Each investor profile includes:
+- **Basic Information**: Name, bio, full biography, location, profile image
+- **Investment Details**:
+  - Investment stages (Seed, Series A, etc.)
+  - Check size ranges
+  - Geographic focus
+  - Portfolio companies
+  - Investment philosophy
+  - Funding source
+  - Exit expectations
+  - Decision process & speed
+  - Reputation & network
+  - Traction requirements
+  - Board participation preferences
+- **Contact Information**: Email, LinkedIn, Twitter, website
+
+### 🚀 **Performance & UX**
+- **Fast Search**: Multi-layer caching (Redis, SWR, IndexedDB) for instant results
+- **Offline Support**: Works completely offline with cached data and Service Worker
+- **Progress Tracking**: Real-time progress updates during search
+- **Dynamic Examples**: Example queries change on every page reload
+- **Beautiful UI**: Modern, responsive design with smooth animations
+
+### 🔄 **Auto-Enrichment**
+- Automatically enriches investor profiles with missing information
+- Uses AI to fill in gaps when viewing profiles
+- Ensures complete data for all investors
+
+### 💾 **Data Management**
+- **Redis Caching**: Fast, persistent caching (never expires)
+- **Local Storage**: JSON database for data persistence
+- **IndexedDB**: Client-side offline storage
+- **SWR**: Efficient data fetching with revalidation
+
+## 🛠️ Tech Stack
 
 - **Next.js 16** - React framework with App Router
 - **TypeScript** - Type-safe development
-- **Tailwind CSS** - Styling
-- **Crawl4AI** - Advanced web scraping with JavaScript rendering
-- **Cheerio** - HTML parsing
-- **OpenAI API** - AI-powered interest extraction (optional)
-- **Redis** - Caching layer (optional)
-- **Node-cron** - Scheduled tasks
-- **HeroUI** - UI components
+- **Tailwind CSS 4** - Modern styling
+- **OpenAI API** - AI-powered investor search and profile generation
+- **Redis (ioredis)** - Caching layer
+- **SWR** - Data fetching and caching
+- **Framer Motion** - Smooth animations
+- **HeroUI** - UI component library
+- **Sonner** - Toast notifications
+- **Lucide React** - Icons
 
-## Getting Started
+## 🚀 Getting Started
 
 ### Prerequisites
 
-- Node.js 18+ 
-- pnpm (or npm/yarn)
+- Node.js 18+
+- pnpm (recommended) or npm/yarn
+- Redis server (optional, for caching)
+- OpenAI API key (required for AI features)
 
 ### Installation
 
-1. Clone the repository:
+1. **Clone the repository:**
 ```bash
 git clone <your-repo-url>
 cd investors
 ```
 
-2. Install dependencies:
+2. **Install dependencies:**
 ```bash
 pnpm install
 ```
 
-3. Set up Crawl4AI server (required for scraping):
-   
-   **Option A: Using Docker (Recommended)**
-   ```bash
-   docker run -p 11235:11235 unclecode/crawl4ai:basic
-   ```
-   
-   **Option B: Using Python**
-   ```bash
-   pip install crawl4ai
-   crawl4ai-setup
-   # Then run Crawl4AI as a server (check official docs)
-   ```
-   
-   See [CRAWL4AI_SETUP.md](./CRAWL4AI_SETUP.md) for detailed setup instructions.
-
-4. (Optional) Set up environment variables:
+3. **Set up environment variables:**
 ```bash
 cp .env.example .env
-# Edit .env and add:
-# - OPENAI_API_KEY (for better AI extraction)
-# - REDIS_URL (for caching)
-# - CRAWL4AI_API_URL (if using non-default server)
 ```
 
-5. Run the development server:
+Edit `.env` and add:
+```env
+# Required
+OPENAI_API_KEY=your_openai_api_key_here
+
+# Optional (for caching)
+REDIS_URL=redis://localhost:6379
+```
+
+4. **Start Redis (optional but recommended):**
+```bash
+# Using Docker
+docker run -d -p 6379:6379 redis:latest
+
+# Or install locally
+# macOS: brew install redis && brew services start redis
+# Ubuntu: sudo apt-get install redis-server && sudo systemctl start redis
+```
+
+5. **Run the development server:**
 ```bash
 pnpm dev
 ```
 
-6. Open [http://localhost:3000](http://localhost:3000) in your browser
+6. **Open your browser:**
+Navigate to [http://localhost:3000](http://localhost:3000)
 
-## How It Works
+## 📖 How It Works
 
-1. **Scraping**: The system scrapes multiple sources (Crunchbase, AngelList, etc.) for angel investor profiles
-2. **AI Extraction**: Uses AI to extract investment interests and relevant information from the scraped data
-3. **Storage**: Saves investor data to `data/investors.json`
-4. **Display**: Shows all investors in a beautiful card-based UI
-5. **Auto-Update**: Runs automatically every 5 minutes to keep data fresh
+### Search Flow
 
-## API Routes
+1. **User Query**: Enter a description of your startup or what you're looking for
+2. **AI Search**: OpenAI searches for relevant investors matching your query
+3. **Profile Generation**: AI generates complete investor profiles with all details
+4. **Caching**: Results are cached in Redis and IndexedDB for fast access
+5. **Display**: Investors are shown in beautiful cards with all information
 
-- `GET /api/investors` - Get all investors
-- `POST /api/scrape` - Manually trigger a scraping job
-- `GET /api/init` - Initialize the scheduler
+### Data Flow
 
-## Project Structure
+```
+User Query → OpenAI Search → Profile Generation → Redis Cache → Local DB → Display
+                ↓
+         Progress Tracking
+                ↓
+         Auto-Enrichment (if needed)
+```
+
+### Offline Support
+
+- **Service Worker**: Caches API responses for offline access
+- **IndexedDB**: Stores search results locally
+- **Network Detection**: Shows notification when offline
+- **Graceful Degradation**: Uses cached data when offline
+
+## 📁 Project Structure
 
 ```
 ├── app/
-│   ├── api/           # API routes
-│   ├── page.tsx       # Main page
-│   └── layout.tsx     # Root layout
+│   ├── api/
+│   │   ├── search/          # Search endpoint
+│   │   ├── investor/[id]/   # Individual investor API
+│   │   ├── progress/        # Progress tracking
+│   │   └── scrape/          # Manual scrape trigger
+│   ├── investor/[id]/       # Investor profile page
+│   ├── search/              # Search results page
+│   ├── layout.tsx          # Root layout
+│   └── page.tsx            # Homepage
 ├── components/
-│   └── investors/     # Investor-related components
+│   ├── investors/           # Investor-related components
+│   │   ├── investor-card.tsx
+│   │   ├── investor-list.tsx
+│   │   └── investor-profile.tsx
+│   ├── search/              # Search components
+│   │   ├── search-interface.tsx
+│   │   └── search-results.tsx
+│   └── reusables/           # Reusable components
+│       ├── offline-notification.tsx
+│       └── sponsor-button.tsx
 ├── lib/
-│   ├── db.ts          # Database operations
-│   ├── scraper.ts     # Web scraping logic
-│   ├── ai-service.ts  # AI extraction service
-│   └── scraper-job.ts # Scheduled job management
-└── data/              # Data storage (created automatically)
+│   ├── openai-search.ts     # OpenAI investor search
+│   ├── scraper.ts           # Scraping orchestration
+│   ├── scraper-job.ts       # Job management
+│   ├── investor-enricher.ts # Profile enrichment
+│   ├── db.ts                # Local database
+│   ├── redis.ts             # Redis caching
+│   ├── offline-storage.ts   # IndexedDB storage
+│   ├── progress-tracker.ts  # Progress management
+│   └── fetcher.ts           # SWR fetcher
+├── data/
+│   └── investors.json       # Local data storage
+└── public/
+    └── sw.js                # Service Worker
 ```
 
-## Configuration
+## 🔌 API Routes
+
+### Search
+- `GET /api/search?q={query}` - Search for investors
+  - Returns: `{ investors: Investor[], query: string, total: number, cached?: boolean }`
+
+### Investor Profile
+- `GET /api/investor/[id]` - Get individual investor
+  - Returns: `Investor` object
+- `POST /api/investor/[id]/enrich` - Enrich investor profile
+  - Returns: `{ success: boolean, investor: Investor }`
+
+### Progress
+- `GET /api/progress` - Get current search progress
+  - Returns: `{ stage: string, message: string, progress: number }`
+
+### Manual Operations
+- `POST /api/scrape?q={query}` - Manually trigger scraping
+- `POST /api/clear-lock` - Clear scraping lock
+
+## ⚙️ Configuration
 
 ### Environment Variables
 
-- `OPENAI_API_KEY` (optional): Your OpenAI API key for enhanced AI extraction. If not provided, the system uses keyword-based fallback extraction.
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `OPENAI_API_KEY` | Yes | Your OpenAI API key for AI features |
+| `REDIS_URL` | No | Redis connection URL (default: `redis://localhost:6379`) |
 
-### Customizing Scraping
+### Customization
 
-Edit `lib/scraper.ts` to:
-- Add new scraping sources
-- Modify scraping logic
-- Adjust data extraction patterns
+#### Modify AI Prompts
+Edit `lib/openai-search.ts` to customize:
+- Investor search prompts
+- Profile generation requirements
+- Response format
 
-### Customizing AI Extraction
+#### Adjust Caching
+Edit `lib/redis.ts` to customize:
+- Cache TTL settings
+- Cache keys
+- Cache invalidation logic
 
-Edit `lib/ai-service.ts` to:
-- Change AI model
-- Modify extraction prompts
-- Adjust fallback keyword matching
+#### Change UI
+Edit components in `components/` to customize:
+- Search interface
+- Investor cards
+- Profile display
 
-## Notes
+## 🎯 Key Features Explained
 
-- The scraper includes mock data generation for demonstration purposes when real scraping fails
-- Some websites may have anti-scraping measures; you may need to adjust scraping logic accordingly
-- For production use, consider:
-  - Using a proper database (PostgreSQL, MongoDB, etc.)
-  - Adding rate limiting
-  - Implementing proper error handling and retries
-  - Using a dedicated scraping service or API
+### Multi-Layer Caching
+1. **Query Cache**: Redis cache for specific queries (fast path)
+2. **Investor Cache**: Redis cache for all investors (keyword matching)
+3. **IndexedDB**: Client-side offline storage
+4. **SWR**: Browser-level caching with revalidation
 
-## License
+### Auto-Enrichment
+When viewing an investor profile:
+- System checks for missing fields
+- Automatically enriches using AI if needed
+- Updates database and cache
+- Shows loading state during enrichment
+
+### Progress Tracking
+Real-time progress updates:
+- "Searching for investors..."
+- "Compiling results..."
+- "Almost done..."
+- Progress bar with percentage
+
+### Offline Support
+- Service Worker caches all API responses
+- IndexedDB stores search results
+- Works completely offline after first load
+- Shows network status notification
+
+## 🐛 Troubleshooting
+
+### Redis Connection Issues
+```bash
+# Check if Redis is running
+redis-cli ping
+
+# Should return: PONG
+```
+
+### OpenAI API Errors
+- Verify your API key is correct
+- Check your OpenAI account has credits
+- Ensure you're using a valid model (gpt-4o-mini)
+
+### Build Issues
+```bash
+# Clear Next.js cache
+rm -rf .next
+
+# Reinstall dependencies
+rm -rf node_modules
+pnpm install
+```
+
+## 📝 Notes
+
+- **Data Persistence**: Investor data is stored in `data/investors.json` and Redis
+- **No Expiration**: Redis cache never expires for investor data
+- **Concurrent Requests**: System handles multiple requests for the same query efficiently
+- **Error Handling**: Graceful error handling with user-friendly messages
+- **Production Ready**: Includes offline support, caching, and error handling
+
+## 🚀 Deployment
+
+### Vercel (Recommended)
+1. Push to GitHub
+2. Import project in Vercel
+3. Add environment variables
+4. Deploy
+
+### Other Platforms
+- Ensure Redis is available (or disable caching)
+- Set all environment variables
+- Build: `pnpm build`
+- Start: `pnpm start`
+
+## 📄 License
 
 MIT
+
+## 🙏 Contributing
+
+Contributions are welcome! Please feel free to submit a Pull Request.
+
+---
+
+Built with ❤️ using Next.js, OpenAI, and modern web technologies.

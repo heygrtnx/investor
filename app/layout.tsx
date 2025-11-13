@@ -4,7 +4,8 @@ import { GoogleTagManager, GoogleAnalytics } from "@next/third-parties/google";
 import { Toaster } from "sonner";
 import "./globals.css";
 import NextTopLoader from "nextjs-toploader";
-import { Header, SponsorButton } from "@/components/reusables";
+import { Header, SponsorButton, OfflineNotification } from "@/components/reusables";
+import { ServiceWorkerRegister } from "@/components/reusables/service-worker-register";
 
 export const metadata: Metadata = {
 	title: "AI Investor Finder | Find Perfect Angel Investors for Your Startup",
@@ -28,12 +29,14 @@ export default function RootLayout({
 		<html
 			lang="en"
 			suppressHydrationWarning>
-			<body className={cn("m-auto min-h-screen bg-background bg-center bg-no-repeat scroll-smooth antialiased")}>
+			<body className={cn("m-auto min-h-screen bg-background bg-center bg-no-repeat scroll-smooth antialiased overflow-x-hidden")}>
 				<ThemeProvider
 					attribute="class"
 					defaultTheme="light"
 					enableSystem
 					disableTransitionOnChange>
+					<ServiceWorkerRegister />
+					<OfflineNotification />
 					<NextTopLoader
 						color="#000000"
 						showSpinner={false}

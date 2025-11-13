@@ -78,15 +78,9 @@ export function SearchInterface() {
 						<Brain className="w-10 h-10 text-white" />
 					</motion.div>
 
-					<h1 className="text-5xl sm:text-6xl lg:text-7xl font-bold mb-6 bg-gradient-to-r from-white via-gray-200 to-white bg-clip-text text-transparent">
-						AI Investor Finder
-					</h1>
-					<p className="text-xl sm:text-2xl text-white/80 mb-2">
-						Find the perfect angel investors for your startup
-					</p>
-					<p className="text-sm sm:text-base text-white/60">
-						Powered by AI • Real-time data • Smart matching
-					</p>
+					<h1 className="text-5xl sm:text-6xl lg:text-7xl font-bold mb-6 bg-gradient-to-r from-white via-gray-200 to-white bg-clip-text text-transparent">AI Investor Finder</h1>
+					<p className="text-xl sm:text-2xl text-white/80 mb-2">Find the perfect angel investors for your startup</p>
+					<p className="text-sm sm:text-base text-white/60">Powered by AI • Real-time data • Smart matching</p>
 				</motion.div>
 
 				{/* Search Box */}
@@ -95,7 +89,9 @@ export function SearchInterface() {
 					animate={{ opacity: 1, y: 0 }}
 					transition={{ duration: 0.6, delay: 0.3 }}
 					className="mb-8">
-					<form onSubmit={handleSearch} className="relative">
+					<form
+						onSubmit={handleSearch}
+						className="relative">
 						<div className="relative group">
 							{/* Liquid glass effect container */}
 							<div className="absolute inset-0 bg-white/10 rounded-3xl blur-xl opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
@@ -137,22 +133,22 @@ export function SearchInterface() {
 						<p className="text-white/60 text-sm mb-4 text-center">Try these examples:</p>
 						<div className="flex flex-wrap gap-3 justify-center">
 							{exampleQueries.map((example, index) => (
-							<motion.button
-								key={index}
-								initial={{ opacity: 0, scale: 0.9 }}
-								animate={{ opacity: 1, scale: 1 }}
-								transition={{ duration: 0.3, delay: 0.6 + index * 0.1 }}
-								whileHover={{ scale: 1.05 }}
-								whileTap={{ scale: 0.95 }}
-								onClick={() => {
-									setQuery(example);
-									setTimeout(() => {
-										router.push(`/search?q=${encodeURIComponent(example)}`);
-									}, 100);
-								}}
-								className="px-4 py-2 bg-white/5 dark:bg-gray-900/30 backdrop-blur-xl rounded-full border border-white/10 text-white/80 text-sm hover:bg-white/10 hover:border-white/20 transition-all cursor-pointer">
-								{example}
-							</motion.button>
+								<motion.button
+									key={index}
+									initial={{ opacity: 0, scale: 0.9 }}
+									animate={{ opacity: 1, scale: 1 }}
+									transition={{ duration: 0.3, delay: 0.6 + index * 0.1 }}
+									whileHover={{ scale: 1.05 }}
+									whileTap={{ scale: 0.95 }}
+									onClick={() => {
+										setQuery(example);
+										setTimeout(() => {
+											router.push(`/search?q=${encodeURIComponent(example)}`);
+										}, 100);
+									}}
+									className="px-4 py-2 bg-white/5 dark:bg-gray-900/30 backdrop-blur-xl rounded-full border border-white/10 text-white/80 text-sm hover:bg-white/10 hover:border-white/20 transition-all cursor-pointer">
+									{example}
+								</motion.button>
 							))}
 						</div>
 					</motion.div>
