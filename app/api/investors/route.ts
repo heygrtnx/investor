@@ -12,18 +12,26 @@ export async function GET() {
 			return NextResponse.json({ 
 				investors: cachedInvestors,
 				cached: true 
+			}, {
+				headers: {
+					'Cache-Control': 'public, max-age=300, stale-while-revalidate=600',
+				},
 			});
 		}
 
-		// If not in cache, get from database
-		const investors = getAllInvestors();
+		// If not in cache, get from database (async)
+		const investors = await getAllInvestors();
 		
-		// Cache the result
-		await setCachedInvestors(investors);
+		// Cache the result (non-blocking)
+		setCachedInvestors(investors).catch(() => {});
 		
 		return NextResponse.json({ 
 			investors,
 			cached: false 
+		}, {
+			headers: {
+				'Cache-Control': 'public, max-age=300, stale-while-revalidate=600',
+			},
 		});
 	} catch (error: any) {
 		console.error('Error fetching investors:', error.message);

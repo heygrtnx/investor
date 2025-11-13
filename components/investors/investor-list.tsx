@@ -7,9 +7,10 @@ import { InvestorListSkeleton } from '@/components/ui/investor-skeleton';
 interface InvestorListProps {
 	investors: Investor[];
 	isLoading?: boolean;
+	onInvestorClick?: (investor: Investor) => void;
 }
 
-export function InvestorList({ investors, isLoading }: InvestorListProps) {
+export function InvestorList({ investors, isLoading, onInvestorClick }: InvestorListProps) {
 	if (isLoading) {
 		return <InvestorListSkeleton count={6} />;
 	}
@@ -35,7 +36,12 @@ export function InvestorList({ investors, isLoading }: InvestorListProps) {
 	return (
 		<div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
 			{investors.map((investor, index) => (
-				<InvestorCard key={investor.id} investor={investor} index={index} />
+				<InvestorCard 
+					key={investor.id || `investor-${investor.name}-${index}`} 
+					investor={investor} 
+					index={index}
+					onClick={onInvestorClick}
+				/>
 			))}
 		</div>
 	);

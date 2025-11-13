@@ -1,19 +1,9 @@
-import OpenAI from "openai";
 import { ScrapedInvestorData } from "./scraper";
 import axios from "axios";
+import { getOpenAIClient } from "./openai-client";
 
-// Initialize OpenAI client
-let openai: OpenAI | null = null;
-
-try {
-	if (process.env.OPENAI_API_KEY) {
-		openai = new OpenAI({
-			apiKey: process.env.OPENAI_API_KEY,
-		});
-	}
-} catch (error) {
-	// Silent fail
-}
+// Get OpenAI client
+const openai = getOpenAIClient();
 
 // Get Crawl4AI API URL from environment
 const CRAWL4AI_API_URL = process.env.CRAWL4AI_API_URL || "http://localhost:11235";
@@ -55,7 +45,8 @@ Return only valid, accessible URLs. Format: {"urls": ["url1", "url2", ...]}`,
 		});
 
 		const aiResponse = completion.choices[0].message.content || "{}";
-		const result = JSON.parse(aiResponse);
+		const { safeJsonParse } = await import("./utils");
+		const result = safeJsonParse<{ urls?: string[] }>(aiResponse, { urls: [] });
 		const urls = result.urls || [];
 
 		// Log AI response

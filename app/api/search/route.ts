@@ -1,57 +1,100 @@
 import { NextResponse } from "next/server";
-import { getAllInvestors } from "@/lib/db";
-import { getCachedInvestors, setCachedInvestors } from "@/lib/redis";
+import { getCachedInvestors } from "@/lib/redis";
 import type { Investor } from "@/lib/db";
-import { runScrapingJob } from "@/lib/scraper-job";
-import OpenAI from "openai";
+import {
+	normalizeInvestorName,
+	generateInvestorId,
+	deduplicateInvestors,
+	isValidInvestorData,
+	findInvestorByName,
+	mergeInvestors,
+} from "@/lib/investor-utils";
 
-const openai = process.env.OPENAI_API_KEY
-	? new OpenAI({
-			apiKey: process.env.OPENAI_API_KEY,
-	  })
-	: null;
-
-// Simple keyword matching fallback
+// Optimized keyword matching with early termination and indexing
 function matchInvestorsByKeywords(investors: Investor[], query: string): Investor[] {
+	if (investors.length === 0) return [];
+	
 	const queryLower = query.toLowerCase();
 	const keywords = queryLower.split(/\s+/).filter((w) => w.length > 2);
+	
+	if (keywords.length === 0) {
+		// If no meaningful keywords, return empty or all (depending on query length)
+		return query.length > 2 ? investors.slice(0, 50) : [];
+	}
 
-	return investors
-		.map((investor) => {
+	// Pre-compute investor text for faster matching
+	const investorData = investors.map((investor) => {
+		const nameLower = investor.name.toLowerCase();
+		const bioLower = (investor.bio || "").toLowerCase();
+		const locationLower = (investor.location || "").toLowerCase();
+		const interestsLower = investor.interests.map(i => i.toLowerCase()).join(" ");
+		const fullText = `${nameLower} ${bioLower} ${locationLower} ${interestsLower}`;
+		
+		return { investor, fullText, nameLower, interestsLower };
+	});
+
+	// Score investors
+	const scored = investorData
+		.map(({ investor, fullText, nameLower, interestsLower }) => {
 			let score = 0;
-			const investorText = `${investor.name} ${investor.bio || ""} ${investor.location || ""} ${investor.interests.join(" ")}`.toLowerCase();
+			
+			// Exact name match gets highest score
+			if (nameLower === queryLower) {
+				score += 100;
+			} else if (nameLower.includes(queryLower) || queryLower.includes(nameLower)) {
+				score += 50;
+			}
 
-			keywords.forEach((keyword) => {
-				if (investorText.includes(keyword)) {
+			// Keyword matching
+			for (const keyword of keywords) {
+				if (nameLower.includes(keyword)) {
+					score += 5;
+				}
+				if (fullText.includes(keyword)) {
 					score += 1;
 				}
-			});
+			}
 
-			// Boost score if interests match
-			investor.interests.forEach((interest) => {
-				if (queryLower.includes(interest.toLowerCase()) || interest.toLowerCase().includes(queryLower)) {
-					score += 2;
+			// Interest matching (higher weight)
+			for (const interest of investor.interests) {
+				const interestLower = interest.toLowerCase();
+				if (queryLower.includes(interestLower) || interestLower.includes(queryLower)) {
+					score += 3;
 				}
-			});
+				// Check if any keyword matches interest
+				for (const keyword of keywords) {
+					if (interestLower.includes(keyword) || keyword.includes(interestLower)) {
+						score += 2;
+					}
+				}
+			}
 
 			return { investor, score };
 		})
 		.filter((item) => item.score > 0)
-		.sort((a, b) => b.score - a.score)
-		.map((item) => item.investor);
+		.sort((a, b) => b.score - a.score);
+
+	return scored.map((item) => item.investor);
 }
 
-// AI-powered matching using OpenAI
+// AI-powered matching using OpenAI (optimized for token usage)
 async function matchInvestorsWithAI(investors: Investor[], query: string): Promise<Investor[]> {
 	if (!openai || investors.length === 0) {
 		return matchInvestorsByKeywords(investors, query);
 	}
 
+	// First do keyword matching to get top candidates
+	const keywordMatched = matchInvestorsByKeywords(investors, query);
+	
+	// If keyword matching found good results, use AI only on top candidates
+	const candidatesToAnalyze = keywordMatched.length > 0 
+		? keywordMatched.slice(0, 30) // Use top 30 from keyword matching
+		: investors.slice(0, 50); // Otherwise use first 50
+
 	try {
-		// Create a summary of all investors for the AI
-		const investorsSummary = investors
-			.slice(0, 100) // Limit to avoid token limits
-			.map((inv) => `Name: ${inv.name}, Interests: ${inv.interests.join(", ")}, Bio: ${inv.bio?.substring(0, 100) || "N/A"}`)
+		// Create a compact summary for the AI (reduced token usage)
+		const investorsSummary = candidatesToAnalyze
+			.map((inv) => `${inv.name}|${inv.interests.slice(0, 3).join(",")}|${(inv.bio || "").substring(0, 80)}`)
 			.join("\n");
 
 		const completion = await openai.chat.completions.create({
@@ -59,38 +102,45 @@ async function matchInvestorsWithAI(investors: Investor[], query: string): Promi
 			messages: [
 				{
 					role: "system",
-					content: `You are an expert at matching startups with angel investors. Given a startup description and a list of investors, return a JSON array of investor names (exactly as provided) that would be a good match, ordered by relevance. Only return investor names that are actually in the list.`,
+					content: `You are an expert at matching startups with angel investors. Given a startup query and investor list, return JSON with "investors" array of matching names (exactly as provided), ordered by relevance. Format: name|interests|bio`,
 				},
 				{
 					role: "user",
-					content: `Startup query: "${query}"\n\nInvestors:\n${investorsSummary}\n\nReturn a JSON array of matching investor names, ordered by relevance.`,
+					content: `Query: "${query}"\n\nInvestors (format: name|interests|bio):\n${investorsSummary}\n\nReturn JSON: {"investors": ["name1", "name2", ...]}`,
 				},
 			],
 			response_format: { type: "json_object" },
 			temperature: 0.3,
+			max_tokens: 500, // Limit response size
 		});
 
 		const result = JSON.parse(completion.choices[0].message.content || "{}");
-		const matchedNames = result.matches || result.investors || [];
+		const matchedNames = result.investors || [];
 
-		// Filter and return matched investors
-		const matchedInvestors = investors.filter((inv) => matchedNames.some((name: string) => name.toLowerCase().includes(inv.name.toLowerCase())));
+		// Create a map for fast lookup
+		const nameMap = new Map(candidatesToAnalyze.map(inv => [inv.name.toLowerCase(), inv]));
 
-		// If AI didn't find matches, fall back to keyword matching
-		if (matchedInvestors.length === 0) {
-			return matchInvestorsByKeywords(investors, query);
+		// Filter and return matched investors in AI order
+		const matchedInvestors: Investor[] = [];
+		for (const name of matchedNames) {
+			const investor = nameMap.get(name.toLowerCase());
+			if (investor) {
+				matchedInvestors.push(investor);
+			}
 		}
 
-		return matchedInvestors;
+		// If AI found matches, return them; otherwise use keyword results
+		return matchedInvestors.length > 0 ? matchedInvestors : keywordMatched;
 	} catch (error: any) {
 		console.error("Error in AI matching:", error.message);
-		return matchInvestorsByKeywords(investors, query);
+		return keywordMatched.length > 0 ? keywordMatched : matchInvestorsByKeywords(investors, query);
 	}
 }
 
 // Cache query results in Redis (query-based cache)
 async function getCachedQueryResults(query: string): Promise<{ investors: Investor[]; aiResponse?: string } | null> {
 	const { getRedisClient } = await import("@/lib/redis");
+	const { safeJsonParse } = await import("@/lib/utils");
 	const client = getRedisClient();
 	if (!client) return null;
 
@@ -98,13 +148,13 @@ async function getCachedQueryResults(query: string): Promise<{ investors: Invest
 		const queryKey = `search:${query.toLowerCase().trim()}`;
 		const data = await client.get(queryKey);
 		if (!data) return null;
-		const parsed = JSON.parse(data);
+		const parsed = safeJsonParse<{ investors: Investor[]; aiResponse?: string } | Investor[]>(data, null);
 		// Handle both old format (array) and new format (object)
 		if (Array.isArray(parsed)) {
 			return { investors: parsed };
 		}
 		return parsed;
-	} catch (error: any) {
+	} catch {
 		return null;
 	}
 }
@@ -119,7 +169,7 @@ async function setCachedQueryResults(query: string, investors: Investor[], aiRes
 		const data = { investors, aiResponse };
 		// Cache for 1 hour
 		await client.setex(queryKey, 3600, JSON.stringify(data));
-	} catch (error: any) {
+	} catch {
 		// Silent fail
 	}
 }
@@ -133,20 +183,221 @@ export async function GET(request: Request) {
 	}
 
 	try {
-		// FAST PATH: Check cache first - return immediately if found
+		// PRIORITY: Contact OpenAI first for fresh search results
+		console.log("\n" + "=".repeat(80));
+		console.log(`🔍 SEARCH REQUEST: "${query}"`);
+		console.log("=".repeat(80));
+		console.log(`⏰ Timestamp: ${new Date().toISOString()}`);
+		
+		const startTime = Date.now();
+		
+		// Set initial progress: "Searching and digging deep"
+		const { setProgress } = await import("@/lib/progress-tracker");
+		await setProgress({
+			stage: "searching",
+			message: "Searching and digging deep...",
+			progress: 10,
+		});
+		
+		console.log(`🤖 Contacting OpenAI API...`);
+		
+		// Import OpenAI search function
+		const { searchInvestorsWithOpenAI } = await import("@/lib/openai-search");
+		
+		// Call OpenAI search directly
+		const openAISearchResult = await searchInvestorsWithOpenAI(query);
+		const openAIInvestors = openAISearchResult.investors;
+		const aiRawResponse = openAISearchResult.rawResponse;
+
+		const openAITime = Date.now() - startTime;
+		console.log(`⏱️  OpenAI API call took: ${openAITime}ms`);
+
+		if (openAIInvestors && openAIInvestors.length > 0) {
+			console.log(`\n✅ OpenAI returned ${openAIInvestors.length} investors for query: "${query}"`);
+			
+			// Update progress: Show total number of responses
+			await setProgress({
+				stage: "discovering",
+				message: `Found ${openAIInvestors.length} investors! Summarizing the records...`,
+				investorsFound: openAIInvestors.length,
+				progress: 50,
+			});
+			
+			console.log(`📝 Processing and converting investors...`);
+
+			// Convert ScrapedInvestorData to Investor format
+			const convertStartTime = Date.now();
+			const { getAllInvestorsSync } = await import("@/lib/db");
+			const existingInvestors = getAllInvestorsSync();
+			console.log(`📚 Loaded ${existingInvestors.length} existing investors from database`);
+
+			const now = new Date().toISOString();
+			const { getInterestsFromOpenAIResponse } = await import("@/lib/openai-search");
+
+			console.log(`🔄 Converting ${openAIInvestors.length} investors to Investor format...`);
+			let newInvestorsCount = 0;
+			let existingInvestorsCount = 0;
+
+			// Convert OpenAI results to Investor format
+			const convertedInvestors: Investor[] = openAIInvestors
+				.filter(isValidInvestorData)
+				.map((data: any) => {
+					const id = generateInvestorId(data.name, data.source || "OpenAI Search");
+					const interests = getInterestsFromOpenAIResponse(data);
+					const profileData = (data as any)._profile || {};
+					const normalizedName = normalizeInvestorName(data.name);
+
+					if (!normalizedName) {
+						console.warn(`⚠️  Skipping investor with empty name:`, data);
+						return null;
+					}
+
+					const existingInvestor = findInvestorByName(existingInvestors, data.name);
+
+					if (existingInvestor) {
+						existingInvestorsCount++;
+						return mergeInvestors(
+							existingInvestor,
+							{
+								bio: data.bio,
+								fullBio: data.fullBio,
+								location: data.location,
+								image: undefined,
+								contactInfo: data.contactInfo,
+							},
+							interests,
+							profileData,
+							now
+						);
+					}
+
+					// New investor
+					newInvestorsCount++;
+					return {
+						id,
+						name: data.name,
+						bio: data.bio,
+						fullBio: data.fullBio,
+						location: data.location,
+						image: undefined,
+						interests,
+						profile: Object.keys(profileData).length > 0 ? profileData : undefined,
+						contactInfo: {
+							email: data.contactInfo?.email,
+							linkedin: data.contactInfo?.linkedin,
+							twitter: data.contactInfo?.twitter,
+							website: data.contactInfo?.website,
+						},
+						source: data.source || "OpenAI Search",
+						scrapedAt: now,
+						lastUpdated: now,
+					};
+				})
+				.filter((inv): inv is Investor => inv !== null);
+
+			const convertTime = Date.now() - convertStartTime;
+			console.log(`✓ Conversion complete: ${newInvestorsCount} new, ${existingInvestorsCount} existing (${convertTime}ms)`);
+
+			// Update progress: Show we're summarizing
+			await setProgress({
+				stage: "compiling",
+				message: `Summarizing ${convertedInvestors.length} records...`,
+				investorsFound: openAIInvestors.length,
+				progress: 75,
+			});
+			
+			// Deduplicate by normalized name
+			console.log(`🔄 Deduplicating ${convertedInvestors.length} investors...`);
+			const { unique: finalInvestors, duplicatesRemoved, invalidRemoved } = deduplicateInvestors(convertedInvestors);
+
+			if (invalidRemoved > 0) {
+				console.warn(`⚠️  Removed ${invalidRemoved} invalid investors during deduplication`);
+			}
+
+			console.log(`✓ Deduplication complete: ${finalInvestors.length} unique investors (${duplicatesRemoved} duplicates removed)`);
+
+			// Log final investor details
+			console.log(`\n📊 Final Investor Summary:`);
+			console.log(`   - Total unique investors: ${finalInvestors.length}`);
+			console.log(`   - With fullBio: ${finalInvestors.filter(i => i.fullBio).length}`);
+			console.log(`   - With profile: ${finalInvestors.filter(i => i.profile).length}`);
+			console.log(`   - With interests: ${finalInvestors.filter(i => i.interests && i.interests.length > 0).length}`);
+
+			// Clear progress before returning
+			const { clearProgress } = await import("@/lib/progress-tracker");
+			await clearProgress();
+			
+			// Return immediately without waiting for database save (non-blocking)
+			const totalTime = Date.now() - startTime;
+			console.log(`\n⚡ Returning ${finalInvestors.length} investors immediately (Total time: ${totalTime}ms)`);
+			console.log("=".repeat(80) + "\n");
+			
+			// Cache the query results (non-blocking)
+			setCachedQueryResults(query, finalInvestors, aiRawResponse).catch(() => {});
+
+			// Save to database in background (non-blocking, don't wait)
+			if (finalInvestors.length > 0) {
+				console.log(`💾 Saving ${finalInvestors.length} investors to database (background)...`);
+				// Run database save in background without blocking response
+				Promise.resolve().then(async () => {
+					try {
+						const dbStartTime = Date.now();
+						const { saveInvestorsSync } = await import("@/lib/db");
+						// Merge with existing investors
+						const allInvestors = [...existingInvestors];
+						let updated = 0;
+						let added = 0;
+						finalInvestors.forEach((inv) => {
+							const index = allInvestors.findIndex((e) => e.id === inv.id);
+							if (index >= 0) {
+								allInvestors[index] = inv;
+								updated++;
+							} else {
+								allInvestors.push(inv);
+								added++;
+							}
+						});
+						saveInvestorsSync(allInvestors);
+						const dbTime = Date.now() - dbStartTime;
+						console.log(`✅ Database save complete: ${added} added, ${updated} updated (${dbTime}ms)`);
+
+						// Update cache in background
+						const cacheStartTime = Date.now();
+						const { setCachedInvestors } = await import("@/lib/redis");
+						await setCachedInvestors(allInvestors);
+						const cacheTime = Date.now() - cacheStartTime;
+						console.log(`✅ Cache update complete (${cacheTime}ms)`);
+					} catch (error: any) {
+						console.error(`❌ Background save error:`, error.message);
+					}
+				});
+			}
+
+			// Return immediately
+			return NextResponse.json(
+				{
+					investors: finalInvestors.slice(0, 50),
+					query,
+					total: finalInvestors.length,
+					cached: false,
+					aiResponse: aiRawResponse,
+				},
+				{
+					headers: {
+						"Cache-Control": "public, max-age=3600, stale-while-revalidate=86400",
+					},
+				}
+			);
+		}
+
+		// Fallback: If OpenAI returns no results, check cache
+		console.log(`\n⚠️  OpenAI returned no results for query: "${query}"`);
+		console.log(`🔍 Checking cache for previous results...`);
 		const cachedResults = await getCachedQueryResults(query);
 		if (cachedResults && cachedResults.investors && cachedResults.investors.length > 0) {
-			// Deduplicate cached results
-			const uniqueCached = new Map<string, Investor>();
-			cachedResults.investors.forEach((investor) => {
-				const normalizedName = investor.name.toLowerCase().trim();
-				if (!uniqueCached.has(normalizedName)) {
-					uniqueCached.set(normalizedName, investor);
-				}
-			});
-			const deduplicatedCached = Array.from(uniqueCached.values());
+			const { unique: deduplicatedCached } = deduplicateInvestors(cachedResults.investors);
 
-			console.log(`⚡ Cache hit for query: "${query}" - returning ${deduplicatedCached.length} investors instantly`);
+			console.log(`⚡ Cache hit for query: "${query}" - returning ${deduplicatedCached.length} investors`);
 			return NextResponse.json(
 				{
 					investors: deduplicatedCached.slice(0, 50),
@@ -163,24 +414,14 @@ export async function GET(request: Request) {
 			);
 		}
 
-		// Get all cached investors for fast matching
+		// Final fallback: Keyword matching on existing investors
 		const allCachedInvestors = await getCachedInvestors<Investor[]>();
 		if (allCachedInvestors && allCachedInvestors.length > 0) {
-			// Fast keyword matching on cached data
 			const matchedInvestors = matchInvestorsByKeywords(allCachedInvestors, query);
 			if (matchedInvestors.length > 0) {
-				// Deduplicate by normalized name
-				const uniqueMatched = new Map<string, Investor>();
-				matchedInvestors.forEach((investor) => {
-					const normalizedName = investor.name.toLowerCase().trim();
-					if (!uniqueMatched.has(normalizedName)) {
-						uniqueMatched.set(normalizedName, investor);
-					}
-				});
-				const deduplicatedMatched = Array.from(uniqueMatched.values());
+				const { unique: deduplicatedMatched } = deduplicateInvestors(matchedInvestors);
 
-				console.log(`⚡ Fast match from cache: "${query}" - returning ${deduplicatedMatched.length} investors`);
-				// Cache the query result for next time
+				console.log(`⚡ Keyword match: "${query}" - returning ${deduplicatedMatched.length} investors`);
 				setCachedQueryResults(query, deduplicatedMatched).catch(() => {});
 				return NextResponse.json(
 					{
@@ -188,7 +429,7 @@ export async function GET(request: Request) {
 						query,
 						total: deduplicatedMatched.length,
 						cached: true,
-						aiResponse: undefined, // Fast match doesn't have AI response
+						aiResponse: undefined,
 					},
 					{
 						headers: {
@@ -199,132 +440,41 @@ export async function GET(request: Request) {
 			}
 		}
 
-		// SLOW PATH: Run scraping job in background, but return cached if available
-		// Start scraping job (non-blocking)
-		const scrapingPromise = runScrapingJob(query)
-			.then(async (allInvestors) => {
-				// Get AI response from Redis (stored by scraper)
-				const { getRedisClient } = await import("@/lib/redis");
-				const client = getRedisClient();
-				let aiResponse: string | undefined;
-				if (client) {
-					try {
-						const responseKey = `ai:response:${query.toLowerCase().trim()}`;
-						aiResponse = (await client.get(responseKey)) || undefined;
-					} catch {
-						// Silent fail
-					}
-				}
-				if (allInvestors.length > 0) {
-					// Match and cache results
-					const matchedInvestors = await matchInvestorsWithAI(allInvestors, query);
-					await setCachedQueryResults(query, matchedInvestors, aiResponse);
-					return { investors: matchedInvestors, aiResponse };
-				}
-				return { investors: [], aiResponse };
-			})
-			.catch(() => ({ investors: [], aiResponse: undefined }));
-
-		// If we have any cached investors, return them immediately while scraping continues
-		if (allCachedInvestors && allCachedInvestors.length > 0) {
-			const quickMatch = matchInvestorsByKeywords(allCachedInvestors, query);
-			if (quickMatch.length > 0) {
-				// Deduplicate quick match results
-				const uniqueQuickMatch = new Map<string, Investor>();
-				quickMatch.forEach((investor) => {
-					const normalizedName = investor.name.toLowerCase().trim();
-					if (!uniqueQuickMatch.has(normalizedName)) {
-						uniqueQuickMatch.set(normalizedName, investor);
-					}
-				});
-				const deduplicatedQuickMatch = Array.from(uniqueQuickMatch.values());
-
-				// Return cached results immediately, update in background
-				scrapingPromise.then((result) => {
-					console.log(`✓ Background scraping completed for: "${query}"`);
-					// Update cache with new AI response if available
-					if (result.aiResponse) {
-						setCachedQueryResults(query, deduplicatedQuickMatch, result.aiResponse).catch(() => {});
-					}
-				});
-				return NextResponse.json(
-					{
-						investors: deduplicatedQuickMatch.slice(0, 50),
-						query,
-						total: deduplicatedQuickMatch.length,
-						cached: true,
-						updating: true, // Indicate results are being updated
-					},
-					{
-						headers: {
-							"Cache-Control": "public, max-age=3600, stale-while-revalidate=86400",
-						},
-					}
-				);
-			}
-		}
-
-		// No cache available, wait for scraping (but this should be rare)
-		const scrapingResult = await scrapingPromise;
-		const allInvestors = scrapingResult.investors;
-
-		if (allInvestors.length === 0) {
-			console.warn(`⚠ No investors found for query: "${query}"`);
-			return NextResponse.json({
-				investors: [],
-				query,
-				total: 0,
-				cached: false,
-				aiResponse: scrapingResult.aiResponse,
-			});
-		}
-
-		console.log(`✓ Found ${allInvestors.length} investors, matching with query: "${query}"`);
-
-		// Match investors using AI or keyword matching
-		const matchedInvestors = await matchInvestorsWithAI(allInvestors, query);
-
-		console.log(`✓ Matched ${matchedInvestors.length} investors for query: "${query}"`);
-
-		// Deduplicate by normalized name before returning
-		const uniqueMatchedInvestors = new Map<string, Investor>();
-		matchedInvestors.forEach((investor) => {
-			const normalizedName = investor.name.toLowerCase().trim();
-			if (!uniqueMatchedInvestors.has(normalizedName)) {
-				uniqueMatchedInvestors.set(normalizedName, investor);
-			} else {
-				// If duplicate found, prefer the one with more complete data
-				const existing = uniqueMatchedInvestors.get(normalizedName)!;
-				const existingCompleteness = (existing.bio?.length || 0) + (existing.fullBio?.length || 0) + (existing.profile ? Object.keys(existing.profile).length : 0);
-				const newCompleteness = (investor.bio?.length || 0) + (investor.fullBio?.length || 0) + (investor.profile ? Object.keys(investor.profile).length : 0);
-				if (newCompleteness > existingCompleteness) {
-					uniqueMatchedInvestors.set(normalizedName, investor);
-				}
-			}
+		// If all else fails, return empty
+		console.warn(`⚠ No results found for query: "${query}"`);
+		return NextResponse.json({
+			investors: [],
+			query,
+			total: 0,
+			cached: false,
 		});
-
-		const deduplicatedInvestors = Array.from(uniqueMatchedInvestors.values());
-
-		// Cache the results with AI response
-		await setCachedQueryResults(query, deduplicatedInvestors, scrapingResult.aiResponse);
-
-		return NextResponse.json(
-			{
-				investors: deduplicatedInvestors.slice(0, 50),
-				query,
-				total: deduplicatedInvestors.length,
-				cached: false,
-				aiResponse: scrapingResult.aiResponse,
-			},
-			{
-				headers: {
-					"Cache-Control": "public, max-age=3600, stale-while-revalidate=86400",
-				},
-			}
-		);
 	} catch (error: any) {
-		// Log error but don't expose to frontend
-		console.error(`Error in search API for query "${query}":`, error.message);
+		console.error("\n" + "=".repeat(80));
+		console.error(`❌ ERROR in search API for query "${query}":`);
+		console.error(`   Error: ${error.message}`);
+		console.error(`   Stack: ${error.stack}`);
+		console.error("=".repeat(80) + "\n");
+		
+		// On error, try cache as fallback
+		console.log(`🔄 Attempting to use cached results as fallback...`);
+		try {
+			const cachedResults = await getCachedQueryResults(query);
+			if (cachedResults && cachedResults.investors && cachedResults.investors.length > 0) {
+				console.log(`✅ Found ${cachedResults.investors.length} cached investors`);
+				return NextResponse.json({
+					investors: cachedResults.investors.slice(0, 50),
+					query,
+					total: cachedResults.investors.length,
+					cached: true,
+					aiResponse: cachedResults.aiResponse,
+				});
+			} else {
+				console.log(`⚠️  No cached results found`);
+			}
+		} catch (cacheError: any) {
+			console.error(`❌ Cache fallback also failed: ${cacheError.message}`);
+		}
+
 		return NextResponse.json({
 			investors: [],
 			query,

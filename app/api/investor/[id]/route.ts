@@ -17,12 +17,17 @@ export async function GET(
 			);
 		}
 
-		// Try cache first
-		const cachedInvestors = await getCachedInvestors<Investor[]>();
+		// Try cache first (parallel with DB read)
+		const [cachedInvestors, investor] = await Promise.all([
+			getCachedInvestors<Investor[]>(),
+			getInvestorById(id),
+		]);
+
+		// Check cache first (faster)
 		if (cachedInvestors) {
-			const investor = cachedInvestors.find((inv) => inv.id === id);
-			if (investor) {
-				return NextResponse.json(investor, {
+			const cachedInvestor = cachedInvestors.find((inv) => inv.id === id);
+			if (cachedInvestor) {
+				return NextResponse.json(cachedInvestor, {
 					headers: {
 						'Cache-Control': 'public, max-age=3600, stale-while-revalidate=86400',
 					},
@@ -30,9 +35,7 @@ export async function GET(
 			}
 		}
 
-		// Fallback to database
-		const investor = getInvestorById(id);
-
+		// Fallback to database result
 		if (!investor) {
 			return NextResponse.json(
 				{ error: 'Investor not found' },

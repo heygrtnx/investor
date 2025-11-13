@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { ArrowLeft, Sparkles, SearchX, RefreshCw, Search, Globe, FileText, CheckCircle } from "lucide-react";
+import { ArrowLeft, Sparkles, SearchX, RefreshCw, Search, Globe, FileText, CheckCircle, RotateCw } from "lucide-react";
 import { useRouter } from "next/navigation";
 import useSWR from "swr";
 import { InvestorListSkeleton } from "@/components/ui/investor-skeleton";
@@ -30,6 +30,8 @@ export function SearchResults({ query }: SearchResultsProps) {
 	const [investors, setInvestors] = useState<Investor[]>([]);
 	const [progress, setProgress] = useState<Progress | null>(null);
 	const [isLongRunning, setIsLongRunning] = useState(false);
+	const [isUpdating, setIsUpdating] = useState(false);
+	const [updateMessage, setUpdateMessage] = useState<string | null>(null);
 	const progressIntervalRef = useRef<NodeJS.Timeout | null>(null);
 	const longRunningTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 	const router = useRouter();
@@ -163,6 +165,43 @@ export function SearchResults({ query }: SearchResultsProps) {
 		}
 	};
 
+	const handleUpdateInvestors = async () => {
+		if (investors.length === 0 || isUpdating) return;
+
+		setIsUpdating(true);
+		setUpdateMessage(null);
+
+		try {
+			const investorIds = investors.map((inv) => inv.id);
+			const response = await fetch("/api/investors/batch-update", {
+				method: "POST",
+				headers: {
+					"Content-Type": "application/json",
+				},
+				body: JSON.stringify({ investorIds }),
+			});
+
+			const result = await response.json();
+
+			if (response.ok && result.success) {
+				setUpdateMessage(result.message || `Successfully updated ${result.updated} investor${result.updated !== 1 ? "s" : ""}`);
+				// Refresh the data
+				mutate();
+				// Clear message after 5 seconds
+				setTimeout(() => setUpdateMessage(null), 5000);
+			} else {
+				setUpdateMessage(result.error || "Failed to update investors");
+				setTimeout(() => setUpdateMessage(null), 5000);
+			}
+		} catch (error: any) {
+			console.error("Error updating investors:", error);
+			setUpdateMessage("Error updating investors. Please try again.");
+			setTimeout(() => setUpdateMessage(null), 5000);
+		} finally {
+			setIsUpdating(false);
+		}
+	};
+
 	// Clear progress when loading completes
 	useEffect(() => {
 		if (!isLoading && investors.length > 0) {
@@ -210,19 +249,50 @@ export function SearchResults({ query }: SearchResultsProps) {
 					</Button>
 
 					<div className="bg-white/10 dark:bg-gray-900/20 backdrop-blur-2xl rounded-3xl border border-white/20 dark:border-white/10 p-6 sm:p-8">
-						<div className="flex items-center gap-3 mb-4">
-							<div className="w-12 h-12 rounded-2xl bg-white/10 backdrop-blur-xl border border-white/10 flex items-center justify-center">
-								<Sparkles className="w-6 h-6 text-white" />
+						<div className="flex items-center justify-between mb-4">
+							<div className="flex items-center gap-3">
+								<div className="w-12 h-12 rounded-2xl bg-white/10 backdrop-blur-xl border border-white/10 flex items-center justify-center">
+									<Sparkles className="w-6 h-6 text-white" />
+								</div>
+								<div>
+									<h1 className="text-2xl sm:text-3xl font-bold text-white mb-1">
+										Search Results
+									</h1>
+									<p className="text-white/60 text-sm">
+										{query ? `Finding investors for: "${query}"` : "Enter a search query"}
+									</p>
+								</div>
 							</div>
-							<div>
-								<h1 className="text-2xl sm:text-3xl font-bold text-white mb-1">
-									Search Results
-								</h1>
-								<p className="text-white/60 text-sm">
-									{query ? `Finding investors for: "${query}"` : "Enter a search query"}
-								</p>
-							</div>
+							{investors.length > 0 && !isLoading && (
+								<Button
+									onClick={handleUpdateInvestors}
+									disabled={isUpdating}
+									startContent={
+										isUpdating ? (
+											<div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+										) : (
+											<RotateCw className="w-4 h-4" />
+										)
+									}
+									className="bg-white/10 hover:bg-white/20 text-white border border-white/20 backdrop-blur-xl disabled:opacity-50">
+									{isUpdating ? "Updating..." : `Update All (${investors.length})`}
+								</Button>
+							)}
 						</div>
+
+						{updateMessage && (
+							<motion.div
+								initial={{ opacity: 0, y: -10 }}
+								animate={{ opacity: 1, y: 0 }}
+								exit={{ opacity: 0, y: -10 }}
+								className={`mt-4 p-4 rounded-2xl border ${
+									updateMessage.includes("Successfully") || updateMessage.includes("updated")
+										? "bg-green-500/10 border-green-500/20 text-green-400"
+										: "bg-red-500/10 border-red-500/20 text-red-400"
+								}`}>
+								<p className="text-sm font-medium">{updateMessage}</p>
+							</motion.div>
+						)}
 
 						{query && (
 							<div className="mt-4 p-4 bg-white/5 rounded-2xl border border-white/10">
@@ -286,7 +356,7 @@ export function SearchResults({ query }: SearchResultsProps) {
 												)}
 												{progress.investorsFound !== undefined && (
 													<p className="text-white/70 text-sm">
-														Found <span className="font-bold text-white">{progress.investorsFound}</span> investors
+														Total: <span className="font-bold text-white">{progress.investorsFound}</span> investors found
 													</p>
 												)}
 												
@@ -314,11 +384,16 @@ export function SearchResults({ query }: SearchResultsProps) {
 						{!progress && (
 							<div className="mb-6 bg-white/10 dark:bg-gray-900/20 backdrop-blur-2xl rounded-2xl border border-white/20 dark:border-white/10 p-6">
 							<div className="flex items-center gap-3 mb-4">
-								<div className="w-8 h-8 rounded-lg bg-white/10 animate-pulse" />
+								<motion.div
+									animate={{ rotate: 360 }}
+									transition={{ duration: 2, repeat: Infinity, ease: "linear" }}
+									className="w-8 h-8 rounded-lg bg-white/10 flex items-center justify-center">
+									<Search className="w-4 h-4 text-white" />
+								</motion.div>
 								<div className="h-4 w-48 bg-white/20 rounded animate-pulse" />
 							</div>
 							<p className="text-white/60 text-sm">
-								AI is analyzing your query and finding the best matching investors...
+								Searching and digging deep...
 							</p>
 						</div>
 						)}

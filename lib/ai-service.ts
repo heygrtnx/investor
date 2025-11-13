@@ -1,18 +1,8 @@
-import OpenAI from 'openai';
 import { ScrapedInvestorData } from './scraper';
+import { getOpenAIClient } from './openai-client';
 
-// Initialize OpenAI client (will use API key from environment or mock if not available)
-let openai: OpenAI | null = null;
-
-try {
-	if (process.env.OPENAI_API_KEY) {
-		openai = new OpenAI({
-			apiKey: process.env.OPENAI_API_KEY,
-		});
-	}
-} catch (error) {
-	// Silent fail
-}
+// Get OpenAI client
+const openai = getOpenAIClient();
 
 export interface ExtractedInterests {
 	interests: string[];
@@ -45,7 +35,8 @@ export async function extractInterestsWithAI(
 				temperature: 0.3,
 			});
 
-			const result = JSON.parse(completion.choices[0].message.content || '{}');
+			const { safeJsonParse } = await import('./utils');
+			const result = safeJsonParse<{ interests?: string[]; summary?: string }>(completion.choices[0].message.content || '{}', { interests: [] });
 			return {
 				interests: result.interests || [],
 				summary: result.summary,

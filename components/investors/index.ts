@@ -1,6 +1,7 @@
 export { InvestorCard } from './investor-card';
 export { InvestorList } from './investor-list';
 export { InvestorProfile } from './investor-profile';
+export { InvestorModal } from './investor-modal';
 export { RefreshButton } from './refresh-button';
 export { SchedulerInit } from './scheduler-init';
 export { AnimatedHero } from './animated-hero';

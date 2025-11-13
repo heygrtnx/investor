@@ -145,7 +145,7 @@ export function InvestorProfile({ investor: initialInvestor }: InvestorProfilePr
 							<div className="flex flex-wrap gap-2">
 								{investor.profile.investmentStage.map((stage, idx) => (
 									<span
-										key={idx}
+										key={`${investor.id}-stage-${idx}-${stage}`}
 										className="px-3 py-1 bg-white/10 rounded-full text-sm text-white border border-white/20">
 										{stage}
 									</span>
@@ -182,7 +182,7 @@ export function InvestorProfile({ investor: initialInvestor }: InvestorProfilePr
 				<div className="flex flex-wrap gap-2">
 					{investor.profile.geographicFocus.map((region, idx) => (
 						<span
-							key={idx}
+							key={`${investor.id}-region-${idx}-${region}`}
 							className="px-3 py-1 bg-white/10 rounded-full text-sm text-white border border-white/20">
 							{region}
 						</span>
@@ -204,7 +204,7 @@ export function InvestorProfile({ investor: initialInvestor }: InvestorProfilePr
 				<div className="space-y-2">
 					{investor.profile.portfolio.map((company, idx) => (
 						<div
-							key={idx}
+							key={`${investor.id}-portfolio-${idx}-${company}`}
 							className="px-4 py-2 bg-white/5 rounded-xl border border-white/10 text-white">
 							{company}
 						</div>
@@ -347,19 +347,21 @@ export function InvestorProfile({ investor: initialInvestor }: InvestorProfilePr
 	return (
 		<div className="min-h-screen py-8 px-4 sm:px-6 lg:px-8">
 			<div className="max-w-5xl mx-auto">
-				{/* Back Button */}
-				<motion.div
-					initial={{ opacity: 0, y: -20 }}
-					animate={{ opacity: 1, y: 0 }}
-					className="mb-6">
-					<Button
-						variant="light"
-						onClick={() => router.back()}
-						startContent={<ArrowLeft className="w-4 h-4" />}
-						className="text-white/80 hover:text-white">
-						Back
-					</Button>
-				</motion.div>
+				{/* Back Button - only show if not hidden */}
+				{!hideBackButton && (
+					<motion.div
+						initial={{ opacity: 0, y: -20 }}
+						animate={{ opacity: 1, y: 0 }}
+						className="mb-6">
+						<Button
+							variant="light"
+							onClick={() => router.back()}
+							startContent={<ArrowLeft className="w-4 h-4" />}
+							className="text-white/80 hover:text-white">
+							Back
+						</Button>
+					</motion.div>
+				)}
 
 				{/* Header Card */}
 				<motion.div
@@ -478,7 +480,7 @@ export function InvestorProfile({ investor: initialInvestor }: InvestorProfilePr
 						<div className="flex flex-wrap gap-3">
 							{investor.interests.map((interest, idx) => (
 								<span
-									key={idx}
+									key={`${investor.id}-interest-${idx}-${interest}`}
 									className="px-4 py-2 bg-white/10 rounded-full text-sm text-white border border-white/20">
 									{interest}
 								</span>

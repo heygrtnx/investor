@@ -4,19 +4,13 @@ import { scrapeInvestors } from "./scraper";
 import { extractInterestsBatch } from "./ai-service";
 import { getAllInvestors, type Investor } from "./db";
 import { setScrapingLock, invalidateInvestorsCache, isScrapingInProgress, setCachedInvestors, getLastScrapeTime } from "./redis";
-import crypto from "crypto";
+import { generateInvestorId, normalizeInvestorName, findInvestorByName, mergeInvestors, deduplicateInvestors } from "./investor-utils";
 
 const DB_PATH = path.join(process.cwd(), "data", "investors.json");
 
 let isRunning = false;
 let runningQuery: string | undefined = undefined;
 let runningPromise: Promise<Investor[]> | null = null;
-
-// Generate ID from name and source
-function generateId(name: string, source: string): string {
-	const hash = crypto.createHash("md5").update(`${name}-${source}`).digest("hex");
-	return hash.substring(0, 12);
-}
 
 // Main scraping job - accumulates data even if matches exist
 export async function runScrapingJob(query?: string): Promise<Investor[]> {
@@ -121,8 +115,9 @@ export async function runScrapingJob(query?: string): Promise<Investor[]> {
 			// Get interests directly from OpenAI response
 			const { getInterestsFromOpenAIResponse } = await import("./openai-search");
 
-			// Get existing investors
-			const existingInvestors = getAllInvestors();
+			// Get existing investors (use sync version for compatibility, but prefer cache)
+			const { getAllInvestorsSync } = await import("./db");
+			const existingInvestors = getAllInvestorsSync();
 			const existingInvestorsMap = new Map<string, Investor>();
 			existingInvestors.forEach((inv) => existingInvestorsMap.set(inv.id, inv));
 
@@ -169,102 +164,58 @@ export async function runScrapingJob(query?: string): Promise<Investor[]> {
 			scrapedData.forEach((data) => {
 				// Get interests from map
 				let interests = interestsMap.get(data.name)?.interests || [];
-				const id = generateId(data.name, data.source);
-
-				// Normalize name for duplicate checking (case-insensitive, trimmed)
-				const normalizedName = data.name.toLowerCase().trim();
+				const id = generateInvestorId(data.name, data.source);
 
 				// First check by ID (exact match: same name + same source)
 				let existingInvestor = existingInvestorsMap.get(id);
 
 				// If not found by ID, check by normalized name (same investor from different source)
 				if (!existingInvestor) {
-					existingInvestor = Array.from(existingInvestorsMap.values()).find((inv) => inv.name.toLowerCase().trim() === normalizedName);
+					existingInvestor = findInvestorByName(Array.from(existingInvestorsMap.values()), data.name);
 				}
 
 				// Get profile data from scraped data
 				const profileData = (data as any)._profile || {};
 
 				if (existingInvestor) {
-					// Merge/update existing investor with new data - accumulate information
-					// Prefer new data if it's more complete
-					const updatedInvestor: Investor = {
-						...existingInvestor,
-						// Merge bio if new one is longer or more detailed
-						bio: data.bio && (!existingInvestor.bio || data.bio.length > existingInvestor.bio.length) ? data.bio : existingInvestor.bio,
-						// Merge fullBio - prefer new one if it's longer or more detailed
-						fullBio: data.fullBio && (!existingInvestor.fullBio || data.fullBio.length > existingInvestor.fullBio.length) ? data.fullBio : existingInvestor.fullBio,
-						// Merge location if new one exists
-						location: data.location || existingInvestor.location,
-						// Merge image - prefer new image if available
-						image: data.image || existingInvestor.image,
-						// Merge interests - combine unique interests
-						interests: interests.length > 0 ? [...new Set([...existingInvestor.interests, ...interests])] : existingInvestor.interests,
-						// Merge profile - prefer new profile data if it's more complete
-						profile:
-							Object.keys(profileData).length > 0
-								? {
-										...existingInvestor.profile,
-										// Only update fields if new data is provided and not empty
-										investmentStage: profileData.investmentStage && profileData.investmentStage.length > 0 ? profileData.investmentStage : existingInvestor.profile?.investmentStage,
-										checkSize: profileData.checkSize || existingInvestor.profile?.checkSize,
-										geographicFocus: profileData.geographicFocus && profileData.geographicFocus.length > 0 ? profileData.geographicFocus : existingInvestor.profile?.geographicFocus,
-										portfolio: profileData.portfolio && profileData.portfolio.length > 0 ? profileData.portfolio : existingInvestor.profile?.portfolio,
-										investmentPhilosophy: profileData.investmentPhilosophy || existingInvestor.profile?.investmentPhilosophy,
-										fundingSource: profileData.fundingSource || existingInvestor.profile?.fundingSource,
-										exitExpectations: profileData.exitExpectations || existingInvestor.profile?.exitExpectations,
-										decisionProcess: profileData.decisionProcess || existingInvestor.profile?.decisionProcess,
-										decisionSpeed: profileData.decisionSpeed || existingInvestor.profile?.decisionSpeed,
-										reputation: profileData.reputation || existingInvestor.profile?.reputation,
-										network: profileData.network || existingInvestor.profile?.network,
-										tractionRequired: profileData.tractionRequired || existingInvestor.profile?.tractionRequired,
-										boardParticipation: profileData.boardParticipation || existingInvestor.profile?.boardParticipation,
-								  }
-								: existingInvestor.profile,
-						// Merge contact info - prefer new data if available
-						contactInfo: {
-							email: data.contactInfo?.email || existingInvestor.contactInfo?.email,
-							linkedin: data.contactInfo?.linkedin || existingInvestor.contactInfo?.linkedin,
-							twitter: data.contactInfo?.twitter || existingInvestor.contactInfo?.twitter,
-							website: data.contactInfo?.website || existingInvestor.contactInfo?.website,
-							other: existingInvestor.contactInfo?.other || [],
+					// Merge/update existing investor with new data
+					const updatedInvestor = mergeInvestors(
+						existingInvestor,
+						{
+							bio: data.bio,
+							fullBio: data.fullBio,
+							location: data.location,
+							image: data.image,
+							contactInfo: data.contactInfo,
 						},
-						lastUpdated: now,
-					};
+						interests,
+						profileData,
+						now
+					);
 					// Use existing ID to maintain consistency
 					updatedInvestor.id = existingInvestor.id;
 					newInvestors.push(updatedInvestor);
 					updatedCount++;
 				} else {
 					// Check if we already added this investor in this batch (by name)
-					const alreadyAdded = newInvestors.find((inv) => inv.name.toLowerCase().trim() === normalizedName);
+					const normalizedName = normalizeInvestorName(data.name);
+					const alreadyAdded = newInvestors.find((inv) => normalizeInvestorName(inv.name) === normalizedName);
 
 					if (alreadyAdded) {
 						// Merge with the one we already added in this batch
-						const mergedInvestor: Investor = {
-							...alreadyAdded,
-							// Merge bio if new one is longer
-							bio: data.bio && (!alreadyAdded.bio || data.bio.length > alreadyAdded.bio.length) ? data.bio : alreadyAdded.bio,
-							fullBio: data.fullBio && (!alreadyAdded.fullBio || data.fullBio.length > alreadyAdded.fullBio.length) ? data.fullBio : alreadyAdded.fullBio,
-							location: data.location || alreadyAdded.location,
-							image: data.image || alreadyAdded.image,
-							interests: interests.length > 0 ? [...new Set([...alreadyAdded.interests, ...interests])] : alreadyAdded.interests,
-							profile:
-								Object.keys(profileData).length > 0
-									? {
-											...alreadyAdded.profile,
-											...profileData,
-									  }
-									: alreadyAdded.profile,
-							contactInfo: {
-								email: data.contactInfo?.email || alreadyAdded.contactInfo?.email,
-								linkedin: data.contactInfo?.linkedin || alreadyAdded.contactInfo?.linkedin,
-								twitter: data.contactInfo?.twitter || alreadyAdded.contactInfo?.twitter,
-								website: data.contactInfo?.website || alreadyAdded.contactInfo?.website,
-								other: alreadyAdded.contactInfo?.other || [],
+						const mergedInvestor = mergeInvestors(
+							alreadyAdded,
+							{
+								bio: data.bio,
+								fullBio: data.fullBio,
+								location: data.location,
+								image: data.image,
+								contactInfo: data.contactInfo,
 							},
-							lastUpdated: now,
-						};
+							interests,
+							profileData,
+							now
+						);
 						// Replace the existing one in newInvestors
 						const index = newInvestors.findIndex((inv) => inv.id === alreadyAdded.id);
 						if (index >= 0) {
@@ -317,39 +268,12 @@ export async function runScrapingJob(query?: string): Promise<Investor[]> {
 				}
 			});
 
-			// Merge with existing investors (keep all existing, add/update new ones) for database storage
-			// Deduplicate by normalized name to avoid duplicates
-			const allInvestorsMap = new Map<string, Investor>();
+			// Merge with existing investors and deduplicate
+			const allInvestors = deduplicateInvestors([...existingInvestors, ...newInvestors]).unique;
 
-			// Add existing investors first
-			existingInvestors.forEach((inv) => {
-				const normalizedName = inv.name.toLowerCase().trim();
-				allInvestorsMap.set(normalizedName, inv);
-			});
-
-			// Add/update with new investors (will overwrite if same normalized name)
-			newInvestors.forEach((investor) => {
-				const normalizedName = investor.name.toLowerCase().trim();
-				const existing = allInvestorsMap.get(normalizedName);
-				if (existing) {
-					// Merge: prefer the one with more complete data
-					const existingCompleteness = (existing.bio?.length || 0) + (existing.fullBio?.length || 0) + (existing.profile ? Object.keys(existing.profile).length : 0);
-					const newCompleteness = (investor.bio?.length || 0) + (investor.fullBio?.length || 0) + (investor.profile ? Object.keys(investor.profile).length : 0);
-					if (newCompleteness > existingCompleteness) {
-						allInvestorsMap.set(normalizedName, investor);
-					} else {
-						// Keep existing but update lastUpdated
-						allInvestorsMap.set(normalizedName, { ...existing, lastUpdated: investor.lastUpdated });
-					}
-				} else {
-					allInvestorsMap.set(normalizedName, investor);
-				}
-			});
-
-			const allInvestors = Array.from(allInvestorsMap.values());
-
-			// Save all investors to database (for accumulation)
-			fs.writeFileSync(DB_PATH, JSON.stringify(allInvestors, null, 2));
+			// Save all investors to database (for accumulation) - use sync version
+			const { saveInvestorsSync } = await import("./db");
+			saveInvestorsSync(allInvestors);
 
 			// Update Redis cache with all investors (no expiration)
 			await invalidateInvestorsCache();
@@ -372,24 +296,10 @@ export async function runScrapingJob(query?: string): Promise<Investor[]> {
 			await clearProgress();
 
 			// Deduplicate newInvestors by normalized name before returning
-			const uniqueNewInvestors = new Map<string, Investor>();
-			newInvestors.forEach((investor) => {
-				const normalizedName = investor.name.toLowerCase().trim();
-				if (!uniqueNewInvestors.has(normalizedName)) {
-					uniqueNewInvestors.set(normalizedName, investor);
-				} else {
-					// If duplicate found, prefer the one with more complete data
-					const existing = uniqueNewInvestors.get(normalizedName)!;
-					const existingCompleteness = (existing.bio?.length || 0) + (existing.fullBio?.length || 0) + (existing.profile ? Object.keys(existing.profile).length : 0);
-					const newCompleteness = (investor.bio?.length || 0) + (investor.fullBio?.length || 0) + (investor.profile ? Object.keys(investor.profile).length : 0);
-					if (newCompleteness > existingCompleteness) {
-						uniqueNewInvestors.set(normalizedName, investor);
-					}
-				}
-			});
+			const { unique: uniqueNewInvestors } = deduplicateInvestors(newInvestors);
 
 			// Return only newly scraped investors (deduplicated, not merged with existing)
-			return Array.from(uniqueNewInvestors.values());
+			return uniqueNewInvestors;
 		} catch (error: any) {
 			// Clear progress on error - don't throw, just return empty
 			const { clearProgress } = await import("./progress-tracker");

@@ -82,17 +82,43 @@ const CACHE_TTL = {
 	scrapeLock: 300, // 5 minutes
 } as const;
 
+// Helper to ensure Redis connection is ready
+async function ensureRedisConnection(client: ReturnType<typeof getRedisClient>): Promise<boolean> {
+	if (!client) return false;
+	try {
+		if (client.status !== 'ready') {
+			await client.connect();
+		}
+		return client.status === 'ready';
+	} catch {
+		return false;
+	}
+}
+
+// Safe JSON parse with fallback
+function safeJsonParse<T>(data: string | null, fallback: T): T {
+	if (!data) return fallback;
+	try {
+		return JSON.parse(data) as T;
+	} catch {
+		return fallback;
+	}
+}
+
 // Get cached investors
 export async function getCachedInvestors<T>(): Promise<T | null> {
 	const client = getRedisClient();
 	if (!client) return null;
 
 	try {
-		const data = await client.get(CACHE_KEYS.investors);
-		return data ? JSON.parse(data) : null;
-	} catch (error: any) {
-		return null;
+		if (await ensureRedisConnection(client)) {
+			const data = await client.get(CACHE_KEYS.investors);
+			return safeJsonParse<T | null>(data, null);
+		}
+	} catch {
+		// Silent fail
 	}
+	return null;
 }
 
 // Set cached investors (never expires)
@@ -101,9 +127,10 @@ export async function setCachedInvestors<T>(data: T): Promise<void> {
 	if (!client) return;
 
 	try {
-		// Use SET without expiration - data never expires
-		await client.set(CACHE_KEYS.investors, JSON.stringify(data));
-	} catch (error: any) {
+		if (await ensureRedisConnection(client)) {
+			await client.set(CACHE_KEYS.investors, JSON.stringify(data));
+		}
+	} catch {
 		// Silent fail
 	}
 }
@@ -180,9 +207,22 @@ export async function testRedisConnection(): Promise<boolean> {
 	}
 }
 
-// Connect to Redis on module load
+// Connect to Redis on module load and keep connection alive
 if (typeof window === 'undefined') {
-	getRedisClient()?.connect().catch((err) => {
-		// Silent fail
-	});
+	const client = getRedisClient();
+	if (client) {
+		// Pre-connect immediately
+		client.connect().catch((err) => {
+			// Silent fail - will retry on first use
+		});
+		
+		// Keep connection alive with periodic pings
+		setInterval(() => {
+			if (client && client.status === 'ready') {
+				client.ping().catch(() => {
+					// Silent fail
+				});
+			}
+		}, 30000); // Ping every 30 seconds
+	}
 }

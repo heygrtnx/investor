@@ -1,20 +1,10 @@
-import OpenAI from "openai";
 import { Investor } from "./db";
 import { saveInvestor } from "./db";
 import { getCachedInvestors, setCachedInvestors } from "./redis";
+import { getOpenAIClient } from "./openai-client";
 
-// Initialize OpenAI client
-let openai: OpenAI | null = null;
-
-try {
-	if (process.env.OPENAI_API_KEY) {
-		openai = new OpenAI({
-			apiKey: process.env.OPENAI_API_KEY,
-		});
-	}
-} catch (error) {
-	// Silent fail
-}
+// Get OpenAI client
+const openai = getOpenAIClient();
 
 // Enrich investor profile with missing details
 export async function enrichInvestorProfile(investor: Investor): Promise<Investor> {
@@ -107,7 +97,8 @@ Provide a complete profile with all missing fields filled in.`,
 		});
 
 		const aiResponse = completion.choices[0].message.content || "{}";
-		const enriched = JSON.parse(aiResponse);
+		const { safeJsonParse } = await import("./utils");
+		const enriched = safeJsonParse<{ fullBio?: string; profile?: any }>(aiResponse, {});
 
 		// Merge enriched data with existing investor
 		const enrichedInvestor: Investor = {
@@ -134,17 +125,18 @@ Provide a complete profile with all missing fields filled in.`,
 			lastUpdated: new Date().toISOString(),
 		};
 
-		// Save enriched investor to database
-		saveInvestor(enrichedInvestor);
+		// Save enriched investor to database (async)
+		await saveInvestor(enrichedInvestor);
 
-		// Update cache
-		const cachedInvestors = await getCachedInvestors<Investor[]>();
-		if (cachedInvestors) {
-			const updated = cachedInvestors.map((inv) =>
-				inv.id === enrichedInvestor.id ? enrichedInvestor : inv
-			);
-			await setCachedInvestors(updated);
-		}
+		// Update cache (non-blocking)
+		getCachedInvestors<Investor[]>().then((cachedInvestors) => {
+			if (cachedInvestors) {
+				const updated = cachedInvestors.map((inv) =>
+					inv.id === enrichedInvestor.id ? enrichedInvestor : inv
+				);
+				setCachedInvestors(updated).catch(() => {});
+			}
+		}).catch(() => {});
 
 		console.log(`✓ Enriched profile for: ${investor.name}`);
 		return enrichedInvestor;

@@ -3,24 +3,18 @@
 import { motion } from 'framer-motion';
 import { Investor } from '@/lib/db';
 import { Mail, Linkedin, Twitter, Globe, MapPin, Sparkles } from 'lucide-react';
-import { useRouter } from 'next/navigation';
 
 interface InvestorCardProps {
 	investor: Investor;
 	index?: number;
+	onClick?: (investor: Investor) => void;
 }
 
-export function InvestorCard({ investor, index = 0 }: InvestorCardProps) {
-	const router = useRouter();
-
+export function InvestorCard({ investor, index = 0, onClick }: InvestorCardProps) {
 	const handleClick = () => {
-		// Store investor data in sessionStorage for instant loading on profile page
-		try {
-			sessionStorage.setItem(`investor_${investor.id}`, JSON.stringify(investor));
-		} catch (error) {
-			// Silent fail if sessionStorage is not available
+		if (onClick) {
+			onClick(investor);
 		}
-		router.push(`/investor/${investor.id}`);
 	};
 
 	return (
@@ -106,7 +100,7 @@ export function InvestorCard({ investor, index = 0 }: InvestorCardProps) {
 							<div className="flex flex-wrap gap-2">
 								{investor.interests.map((interest, idx) => (
 									<motion.span
-										key={idx}
+										key={`${investor.id}-interest-${idx}-${interest}`}
 										initial={{ opacity: 0, scale: 0 }}
 										animate={{ opacity: 1, scale: 1 }}
 										transition={{ duration: 0.3, delay: idx * 0.05 }}

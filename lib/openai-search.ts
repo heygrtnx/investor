@@ -1,19 +1,8 @@
-import OpenAI from "openai";
-import crypto from "crypto";
 import { ScrapedInvestorData } from "./scraper";
+import { getOpenAIClient } from "./openai-client";
 
-// Initialize OpenAI client
-let openai: OpenAI | null = null;
-
-try {
-	if (process.env.OPENAI_API_KEY) {
-		openai = new OpenAI({
-			apiKey: process.env.OPENAI_API_KEY,
-		});
-	}
-} catch (error) {
-	// Silent fail
-}
+// Get OpenAI client
+const openai = getOpenAIClient();
 
 // Extended interface to include interests and profile from OpenAI
 interface OpenAIInvestorData extends ScrapedInvestorData {
@@ -42,7 +31,7 @@ Each investor MUST have:
 - bio (REQUIRED): Brief bio or description (at least 50 words)
 - fullBio (REQUIRED): Extended, detailed biography (at least 200 words) covering their background, experience, achievements, and investment history
 - location (REQUIRED): Location/city where they are based
-- image (OPTIONAL): Profile image URL (LinkedIn profile image, Twitter avatar, or professional photo URL if available)
+- image (OPTIONAL): Not used - removed for performance
 - contactInfo (REQUIRED): Object with email, linkedin, twitter, website (include at least 2 of these)
 - interests (REQUIRED): Array of investment interests/sectors (e.g., ["SaaS", "AI/ML", "FinTech"]) - at least 3-5 interests
 - profile (REQUIRED): Detailed investment profile object with ALL of the following fields:
@@ -87,60 +76,50 @@ Ensure every investor has ALL required fields filled with detailed, specific inf
 		});
 
 		const aiResponse = completion.choices[0].message.content || "{}";
-		const result = JSON.parse(aiResponse);
+		
+		// Log raw AI response
+		console.log("=".repeat(80));
+		console.log("🤖 RAW OpenAI API Response:");
+		console.log("=".repeat(80));
+		console.log(aiResponse);
+		console.log("=".repeat(80));
+		
+		const { safeJsonParse } = await import("./utils");
+		const result = safeJsonParse<{ investors: any[] }>(aiResponse, { investors: [] });
 
-		// Log AI response
-		console.log("🤖 AI Response (Investor Search):", JSON.stringify(result, null, 2));
+		// Log parsed AI response
+		console.log("\n📦 Parsed AI Response Structure:");
+		console.log(JSON.stringify(result, null, 2));
+		console.log("\n");
 
 		const investors = result.investors || [];
 
-		// Log if no investors found
-		if (investors.length === 0) {
+		// Log investor count and details
+		console.log(`📊 Found ${investors.length} investors in AI response`);
+		if (investors.length > 0) {
+			console.log("\n📋 Investor Summary:");
+			investors.slice(0, 5).forEach((inv: any, idx: number) => {
+				console.log(`  ${idx + 1}. ${inv.name || "Unknown"}`);
+				console.log(`     - Bio: ${inv.bio ? inv.bio.substring(0, 100) + "..." : "N/A"}`);
+				console.log(`     - Location: ${inv.location || "N/A"}`);
+				console.log(`     - Interests: ${(inv.interests || []).slice(0, 3).join(", ") || "N/A"}`);
+				console.log(`     - Has Profile: ${inv.profile ? "Yes" : "No"}`);
+			});
+			if (investors.length > 5) {
+				console.log(`  ... and ${investors.length - 5} more investors`);
+			}
+		} else {
 			console.warn("⚠ OpenAI returned no investors for query:", query);
 		}
 
-		// Helper function to get image URL from contact info
-		const getImageUrl = (inv: any): string | undefined => {
-			// If OpenAI provided image, use it
-			if (inv.image) {
-				return inv.image;
-			}
-			
-			// Try to construct image URLs from social profiles
-			if (inv.contactInfo?.twitter) {
-				// Twitter avatar: https://unavatar.io/twitter/{username}
-				const twitterMatch = inv.contactInfo.twitter.match(/twitter\.com\/([^/?]+)/);
-				if (twitterMatch) {
-					return `https://unavatar.io/twitter/${twitterMatch[1]}`;
-				}
-			}
-			
-			// Try Gravatar if email is available
-			if (inv.contactInfo?.email) {
-				const hash = crypto.createHash('md5').update(inv.contactInfo.email.toLowerCase().trim()).digest('hex');
-				return `https://www.gravatar.com/avatar/${hash}?d=identicon&s=200`;
-			}
-			
-			// Try LinkedIn profile image (using unavatar)
-			if (inv.contactInfo?.linkedin) {
-				const linkedinMatch = inv.contactInfo.linkedin.match(/linkedin\.com\/in\/([^/?]+)/);
-				if (linkedinMatch) {
-					return `https://unavatar.io/linkedin/${linkedinMatch[1]}`;
-				}
-			}
-			
-			return undefined;
-		};
-
-		// Map to ScrapedInvestorData format
+		// Map to ScrapedInvestorData format (images removed for performance)
 		const scrapedInvestors: OpenAIInvestorData[] = investors.map((inv: any) => {
-			const imageUrl = getImageUrl(inv);
 			return {
 				name: inv.name || "Unknown",
 				bio: inv.bio,
 				fullBio: inv.fullBio,
 				location: inv.location,
-				image: imageUrl,
+				image: undefined, // Images removed for performance
 				rawText: `${inv.name} ${inv.bio || ""} ${inv.fullBio || ""} ${inv.location || ""} ${(inv.interests || []).join(" ")} ${JSON.stringify(inv.profile || {})}`,
 				source: "OpenAI Search",
 				contactInfo: inv.contactInfo || {},
