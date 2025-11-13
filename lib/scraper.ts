@@ -19,6 +19,45 @@ export interface ScrapedInvestorData {
 const CRAWL4AI_API_URL = process.env.CRAWL4AI_API_URL || "http://localhost:11235";
 const CRAWL4AI_API_TOKEN = process.env.CRAWL4AI_API_TOKEN;
 
+// Poll task endpoint until completion
+async function pollTaskStatus(taskId: string, maxAttempts: number = 60, pollInterval: number = 2000): Promise<any> {
+	const baseUrl = CRAWL4AI_API_URL.replace(/\/$/, "");
+	const taskEndpoint = `${baseUrl}/task/${taskId}`;
+
+	for (let attempt = 0; attempt < maxAttempts; attempt++) {
+		try {
+			const response = await axios.get(taskEndpoint, {
+				headers: {
+					"Content-Type": "application/json",
+					...(CRAWL4AI_API_TOKEN && { Authorization: `Bearer ${CRAWL4AI_API_TOKEN}` }),
+				},
+				timeout: 10000,
+			});
+
+			// Check if task is complete
+			if (response.data?.status === "completed" || response.data?.status === "success") {
+				return response.data;
+			}
+
+			// Check if task failed
+			if (response.data?.status === "failed" || response.data?.status === "error") {
+				return null;
+			}
+
+			// Task is still processing, wait and retry
+			if (attempt < maxAttempts - 1) {
+				await new Promise((resolve) => setTimeout(resolve, pollInterval));
+			}
+		} catch (error: any) {
+			if (attempt < maxAttempts - 1) {
+				await new Promise((resolve) => setTimeout(resolve, pollInterval));
+			}
+		}
+	}
+
+	return null;
+}
+
 // Helper function to call Crawl4AI API directly
 async function crawlWithCrawl4AI(url: string): Promise<string | null> {
 	try {
@@ -51,23 +90,46 @@ async function crawlWithCrawl4AI(url: string): Promise<string | null> {
 			}
 		);
 
-		// Handle array response
-		if (Array.isArray(response.data)) {
-			return response.data[0]?.html || response.data[0]?.markdown || null;
-		}
+		// Check if response contains task_id (async mode)
+		const taskId = response.data?.task_id;
 
-		// Handle single object response
-		if (response.data?.html) {
-			return response.data.html;
-		}
+		if (taskId) {
+			// Poll task endpoint until completion
+			const taskResult = await pollTaskStatus(taskId);
 
-		if (response.data?.markdown) {
-			return response.data.markdown;
-		}
+			if (!taskResult) {
+				return null;
+			}
 
-		return null;
+			// Extract HTML/markdown from task result
+			const resultData = taskResult.data || taskResult.result || taskResult;
+
+			if (Array.isArray(resultData)) {
+				return resultData[0]?.html || resultData[0]?.markdown || null;
+			} else if (resultData) {
+				return resultData.html || resultData.markdown || null;
+			}
+
+			return null;
+		} else {
+			// Synchronous response (direct data)
+			// Handle array response
+			if (Array.isArray(response.data)) {
+				return response.data[0]?.html || response.data[0]?.markdown || null;
+			}
+
+			// Handle single object response
+			if (response.data?.html) {
+				return response.data.html;
+			}
+
+			if (response.data?.markdown) {
+				return response.data.markdown;
+			}
+
+			return null;
+		}
 	} catch (error: any) {
-		console.error(`Crawl4AI API error for ${url}:`, error.response?.status, error.response?.data || error.message);
 		return null;
 	}
 }
@@ -199,11 +261,11 @@ async function scrapeGitHubInvestors(): Promise<ScrapedInvestorData[]> {
 				// Add delay to avoid rate limiting
 				await new Promise((resolve) => setTimeout(resolve, 3000));
 			} catch (error: any) {
-				console.error(`Error scraping GitHub for ${term}:`, error.message);
+				// Silent fail
 			}
 		}
 	} catch (error: any) {
-		console.error("Error scraping GitHub:", error.message);
+		// Silent fail
 	}
 
 	return investors;
@@ -226,7 +288,7 @@ async function scrapeProductHunt(): Promise<ScrapedInvestorData[]> {
 			investors.push(...parsed);
 		}
 	} catch (error: any) {
-		console.error("Error scraping Product Hunt:", error.message);
+		// Silent fail
 	}
 
 	return investors;
@@ -249,7 +311,7 @@ async function scrapeIndieHackers(): Promise<ScrapedInvestorData[]> {
 			investors.push(...parsed);
 		}
 	} catch (error: any) {
-		console.error("Error scraping Indie Hackers:", error.message);
+		// Silent fail
 	}
 
 	return investors;
@@ -273,7 +335,7 @@ async function scrapeYCombinator(): Promise<ScrapedInvestorData[]> {
 			investors.push(...parsed);
 		}
 	} catch (error: any) {
-		console.error("Error scraping Y Combinator:", error.message);
+		// Silent fail
 	}
 
 	return investors;
@@ -302,41 +364,61 @@ async function scrapeCrunchbase(): Promise<ScrapedInvestorData[]> {
 				// Add delay between requests
 				await new Promise((resolve) => setTimeout(resolve, 3000));
 			} catch (error: any) {
-				console.error(`Error scraping ${url}:`, error.message);
+				// Silent fail
 			}
 		}
 	} catch (error: any) {
-		console.error("Error scraping Crunchbase:", error.message);
+		// Silent fail
 	}
 
 	return investors;
 }
 
-// Main scraping function using Crawl4AI API directly
-export async function scrapeInvestors(): Promise<ScrapedInvestorData[]> {
-	console.log(`Starting real-time investor scraping with Crawl4AI API at ${CRAWL4AI_API_URL}...`);
-	const allInvestors: ScrapedInvestorData[] = [];
+// Main scraping function using OpenAI only
+export async function scrapeInvestors(query?: string): Promise<ScrapedInvestorData[]> {
+	if (!query) {
+		return [];
+	}
 
 	try {
-		// Use Crawl4AI API for all sources
-		const results = await Promise.allSettled([scrapeGitHubInvestors(), scrapeProductHunt(), scrapeIndieHackers(), scrapeYCombinator(), scrapeCrunchbase()]);
+		// Import progress tracker and messages
+		const { setProgress, clearProgress } = await import("./progress-tracker");
+		const { getProgressMessageWithContext } = await import("./progress-messages");
 
-		const sourceNames = ["GitHub", "Product Hunt", "Indie Hackers", "Y Combinator", "Crunchbase"];
+		// Generate a consistent index based on query for message selection
+		const queryHash = query ? query.split("").reduce((acc, char) => acc + char.charCodeAt(0), 0) : 0;
 
-		results.forEach((result, index) => {
-			if (result.status === "fulfilled" && result.value.length > 0) {
-				allInvestors.push(...result.value);
-				console.log(`✓ ${sourceNames[index]}: ${result.value.length} investors`);
-			} else if (result.status === "rejected") {
-				console.warn(`⚠ ${sourceNames[index]}: ${result.reason?.message || "Failed"}`);
-			} else if (result.status === "fulfilled" && result.value.length === 0) {
-				console.log(`⚠ ${sourceNames[index]}: No investors found`);
-			}
+		// Set initial progress
+		await setProgress({
+			stage: "searching",
+			message: getProgressMessageWithContext("searching", undefined, queryHash),
+			progress: 0,
+		});
+
+		// Import OpenAI search function
+		const { searchInvestorsWithOpenAI } = await import("./openai-search");
+
+		// Update progress
+		await setProgress({
+			stage: "discovering",
+			message: getProgressMessageWithContext("discovering", undefined, queryHash),
+			progress: 20,
+		});
+
+		// Search for investors directly using OpenAI
+		const investors = await searchInvestorsWithOpenAI(query);
+
+		// Update progress
+		await setProgress({
+			stage: "compiling",
+			message: getProgressMessageWithContext("compiling", investors.length, queryHash),
+			investorsFound: investors.length,
+			progress: 60,
 		});
 
 		// Remove duplicates based on name
 		const uniqueInvestors = new Map<string, ScrapedInvestorData>();
-		allInvestors.forEach((investor) => {
+		investors.forEach((investor) => {
 			const key = investor.name.toLowerCase().trim();
 			if (!uniqueInvestors.has(key) && investor.name.length > 2) {
 				uniqueInvestors.set(key, investor);
@@ -344,15 +426,25 @@ export async function scrapeInvestors(): Promise<ScrapedInvestorData[]> {
 		});
 
 		const finalInvestors = Array.from(uniqueInvestors.values());
-		console.log(`✓ Total unique investors scraped: ${finalInvestors.length}`);
 
-		if (finalInvestors.length === 0) {
-			console.warn(`⚠ No investors found. Check Crawl4AI API at ${CRAWL4AI_API_URL}/crawl is accessible.`);
-		}
+		await setProgress({
+			stage: "almost_done",
+			message: getProgressMessageWithContext("almost_done", finalInvestors.length, queryHash),
+			investorsFound: finalInvestors.length,
+			progress: 90,
+		});
+
+		// Small delay before clearing to ensure frontend sees the progress
+		await new Promise((resolve) => setTimeout(resolve, 500));
+
+		// Clear progress on completion
+		await clearProgress();
 
 		return finalInvestors;
 	} catch (error: any) {
-		console.error("Error in scrapeInvestors:", error.message);
+		// Silently fail - don't throw errors
+		const { clearProgress } = await import("./progress-tracker");
+		await clearProgress();
 		return [];
 	}
 }

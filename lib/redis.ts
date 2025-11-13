@@ -46,7 +46,6 @@ export function getRedisClient(): Redis | null {
 		}
 
 		redis.on('error', (err) => {
-			console.error('Redis connection error:', err.message);
 			redis = null;
 		});
 
@@ -59,13 +58,11 @@ export function getRedisClient(): Redis | null {
 		});
 
 		redis.on('close', () => {
-			console.log('Redis connection closed');
 			redis = null;
 		});
 
 		return redis;
 	} catch (error: any) {
-		console.warn('Redis not available, continuing without cache:', error.message);
 		return null;
 	}
 }
@@ -94,7 +91,6 @@ export async function getCachedInvestors<T>(): Promise<T | null> {
 		const data = await client.get(CACHE_KEYS.investors);
 		return data ? JSON.parse(data) : null;
 	} catch (error: any) {
-		console.error('Error getting cached investors:', error.message);
 		return null;
 	}
 }
@@ -108,7 +104,7 @@ export async function setCachedInvestors<T>(data: T): Promise<void> {
 		// Use SET without expiration - data never expires
 		await client.set(CACHE_KEYS.investors, JSON.stringify(data));
 	} catch (error: any) {
-		console.error('Error setting cached investors:', error.message);
+		// Silent fail
 	}
 }
 
@@ -125,7 +121,7 @@ export async function invalidateInvestorsCache(): Promise<void> {
 			await client.del(...keys);
 		}
 	} catch (error: any) {
-		console.error('Error invalidating cache:', error.message);
+		// Silent fail
 	}
 }
 
@@ -155,7 +151,7 @@ export async function setScrapingLock(locked: boolean): Promise<void> {
 			await client.del(CACHE_KEYS.scrapeLock);
 		}
 	} catch (error: any) {
-		console.error('Error setting scrape lock:', error.message);
+		// Silent fail
 	}
 }
 
@@ -180,7 +176,6 @@ export async function testRedisConnection(): Promise<boolean> {
 		await client.ping();
 		return true;
 	} catch (error: any) {
-		console.error('Redis ping failed:', error.message);
 		return false;
 	}
 }
@@ -188,6 +183,6 @@ export async function testRedisConnection(): Promise<boolean> {
 // Connect to Redis on module load
 if (typeof window === 'undefined') {
 	getRedisClient()?.connect().catch((err) => {
-		console.warn('Failed to connect to Redis on startup:', err.message);
+		// Silent fail
 	});
 }

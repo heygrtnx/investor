@@ -1,7 +1,7 @@
 "use client";
 
 import { motion } from "framer-motion";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Search, Sparkles, ArrowRight, Brain } from "lucide-react";
 import { Button } from "@heroui/react";
 import { useRouter } from "next/navigation";
@@ -10,7 +10,42 @@ import { toast } from "sonner";
 export function SearchInterface() {
 	const [query, setQuery] = useState("");
 	const [isSearching, setIsSearching] = useState(false);
+	const [exampleQueries, setExampleQueries] = useState<string[]>([]);
 	const router = useRouter();
+
+	// Pool of example queries - randomly select 4 on each page load
+	const allExampleQueries = [
+		"I want angel investors for my web hosting company",
+		"Find investors interested in SaaS startups",
+		"Looking for seed investors in fintech",
+		"Angel investors for AI/ML companies",
+		"Early stage investors for my mobile app",
+		"Venture capitalists interested in healthcare tech",
+		"Angel investors for e-commerce startups",
+		"Seed investors for B2B software companies",
+		"Looking for investors in edtech startups",
+		"Angel investors for blockchain projects",
+		"Find investors for my fintech startup",
+		"Early stage investors in consumer products",
+		"Venture capital for biotech companies",
+		"Angel investors for real estate tech",
+		"Seed funding for gaming startups",
+		"Investors interested in climate tech",
+		"Looking for angel investors in food tech",
+		"Venture capital for logistics startups",
+		"Early stage investors for social media apps",
+		"Angel investors for cybersecurity companies",
+		"Find investors for my marketplace platform",
+		"Seed investors in travel tech",
+		"Venture capital for hardware startups",
+		"Angel investors for fitness tech companies",
+	];
+
+	// Randomly select 4 queries on component mount
+	useEffect(() => {
+		const shuffled = [...allExampleQueries].sort(() => Math.random() - 0.5);
+		setExampleQueries(shuffled.slice(0, 4));
+	}, []);
 
 	const handleSearch = async (e?: React.FormEvent) => {
 		if (e) {
@@ -25,13 +60,6 @@ export function SearchInterface() {
 		// Navigate to results page with query
 		router.push(`/search?q=${encodeURIComponent(query.trim())}`);
 	};
-
-	const exampleQueries = [
-		"I want angel investors for my web hosting company",
-		"Find investors interested in SaaS startups",
-		"Looking for seed investors in fintech",
-		"Angel investors for AI/ML companies",
-	];
 
 	return (
 		<div className="flex-1 flex items-center justify-center px-4 sm:px-6 lg:px-8 py-12 sm:py-20">
@@ -100,14 +128,15 @@ export function SearchInterface() {
 				</motion.div>
 
 				{/* Example Queries */}
-				<motion.div
-					initial={{ opacity: 0, y: 20 }}
-					animate={{ opacity: 1, y: 0 }}
-					transition={{ duration: 0.6, delay: 0.5 }}
-					className="mb-8">
-					<p className="text-white/60 text-sm mb-4 text-center">Try these examples:</p>
-					<div className="flex flex-wrap gap-3 justify-center">
-						{exampleQueries.map((example, index) => (
+				{exampleQueries.length > 0 && (
+					<motion.div
+						initial={{ opacity: 0, y: 20 }}
+						animate={{ opacity: 1, y: 0 }}
+						transition={{ duration: 0.6, delay: 0.5 }}
+						className="mb-8">
+						<p className="text-white/60 text-sm mb-4 text-center">Try these examples:</p>
+						<div className="flex flex-wrap gap-3 justify-center">
+							{exampleQueries.map((example, index) => (
 							<motion.button
 								key={index}
 								initial={{ opacity: 0, scale: 0.9 }}
@@ -124,9 +153,10 @@ export function SearchInterface() {
 								className="px-4 py-2 bg-white/5 dark:bg-gray-900/30 backdrop-blur-xl rounded-full border border-white/10 text-white/80 text-sm hover:bg-white/10 hover:border-white/20 transition-all cursor-pointer">
 								{example}
 							</motion.button>
-						))}
-					</div>
-				</motion.div>
+							))}
+						</div>
+					</motion.div>
+				)}
 
 				{/* Features */}
 				<motion.div

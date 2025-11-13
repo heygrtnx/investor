@@ -11,7 +11,7 @@ try {
 		});
 	}
 } catch (error) {
-	console.warn('OpenAI API key not found, using fallback extraction');
+	// Silent fail
 }
 
 export interface ExtractedInterests {
@@ -51,7 +51,6 @@ export async function extractInterestsWithAI(
 				summary: result.summary,
 			};
 		} catch (error) {
-			console.error('Error calling OpenAI API:', error);
 			return extractInterestsFallback(investorData);
 		}
 	}

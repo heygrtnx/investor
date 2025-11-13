@@ -4,7 +4,7 @@ import { GoogleTagManager, GoogleAnalytics } from "@next/third-parties/google";
 import { Toaster } from "sonner";
 import "./globals.css";
 import NextTopLoader from "nextjs-toploader";
-import { Header } from "@/components/reusables";
+import { Header, SponsorButton } from "@/components/reusables";
 
 export const metadata: Metadata = {
 	title: "AI Investor Finder | Find Perfect Angel Investors for Your Startup",
@@ -40,6 +40,7 @@ export default function RootLayout({
 						easing="ease"
 					/>
 					{children}
+					<SponsorButton />
 
 					<Toaster
 						position="top-right"

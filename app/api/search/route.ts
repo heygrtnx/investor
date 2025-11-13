@@ -94,35 +94,33 @@ async function matchInvestorsWithAI(investors: Investor[], query: string): Promi
 }
 
 export async function GET(request: Request) {
+	const { searchParams } = new URL(request.url);
+	const query = searchParams.get('q') || '';
+
+	if (!query) {
+		return NextResponse.json({ investors: [], query, total: 0 });
+	}
+
 	try {
-		const { searchParams } = new URL(request.url);
-		const query = searchParams.get('q') || '';
+		// Run scraping job with query context - only use freshly scraped data
+		const allInvestors = await runScrapingJob(query);
 
-		if (!query) {
-			return NextResponse.json({ investors: [], error: 'No query provided' }, { status: 400 });
+		// If no investors were scraped, return empty array (don't show error)
+		if (allInvestors.length === 0) {
+			console.warn(`⚠ No investors found for query: "${query}"`);
+			return NextResponse.json({
+				investors: [],
+				query,
+				total: 0,
+			});
 		}
 
-		// Trigger scraping job in the background (non-blocking)
-		// This accumulates more investors to the database
-		runScrapingJob().catch((error) => {
-			console.error('Background scraping error:', error);
-		});
-
-		// Get all investors (from cache or database)
-		let allInvestors: Investor[] = [];
-		const cachedInvestors = await getCachedInvestors<Investor[]>();
-		
-		if (cachedInvestors) {
-			allInvestors = cachedInvestors;
-		} else {
-			allInvestors = getAllInvestors();
-			if (allInvestors.length > 0) {
-				await setCachedInvestors(allInvestors);
-			}
-		}
+		console.log(`✓ Found ${allInvestors.length} investors, matching with query: "${query}"`);
 
 		// Match investors using AI or keyword matching
 		const matchedInvestors = await matchInvestorsWithAI(allInvestors, query);
+
+		console.log(`✓ Matched ${matchedInvestors.length} investors for query: "${query}"`);
 
 		return NextResponse.json({
 			investors: matchedInvestors.slice(0, 50), // Limit to top 50 results
@@ -130,8 +128,13 @@ export async function GET(request: Request) {
 			total: matchedInvestors.length,
 		});
 	} catch (error: any) {
-		console.error('Error in search API:', error.message);
-		return NextResponse.json({ error: 'Failed to search investors', investors: [] }, { status: 500 });
+		// Log error but don't expose to frontend
+		console.error(`Error in search API for query "${query}":`, error.message);
+		return NextResponse.json({
+			investors: [],
+			query,
+			total: 0,
+		});
 	}
 }
 

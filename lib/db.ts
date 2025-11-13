@@ -44,7 +44,6 @@ export function getAllInvestors(): Investor[] {
 		const data = fs.readFileSync(DB_PATH, 'utf-8');
 		return JSON.parse(data);
 	} catch (error) {
-		console.error('Error reading investors:', error);
 		return [];
 	}
 }
