@@ -1,10 +1,10 @@
 import { NextResponse } from 'next/server';
-import { triggerScrapingJob } from '@/lib/scraper-job';
+import { runScrapingJob } from '@/lib/scraper-job';
 
 export async function POST() {
 	try {
 		// Trigger scraping job asynchronously
-		triggerScrapingJob().catch(console.error);
+		runScrapingJob().catch(console.error);
 		
 		return NextResponse.json({ 
 			message: 'Scraping job triggered',

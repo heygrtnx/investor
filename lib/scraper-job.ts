@@ -1,16 +1,14 @@
-import cron from 'node-cron';
 import fs from 'fs';
 import path from 'path';
 import { scrapeInvestors } from './scraper';
 import { extractInterestsBatch } from './ai-service';
 import { getAllInvestors, type Investor } from './db';
-import { setScrapingLock, invalidateInvestorsCache, isScrapingInProgress } from './redis';
+import { setScrapingLock, invalidateInvestorsCache, isScrapingInProgress, setCachedInvestors } from './redis';
 import crypto from 'crypto';
 
 const DB_PATH = path.join(process.cwd(), 'data', 'investors.json');
 
 let isRunning = false;
-let schedulerStarted = false;
 
 // Generate ID from name and source
 function generateId(name: string, source: string): string {
@@ -18,8 +16,8 @@ function generateId(name: string, source: string): string {
 	return hash.substring(0, 12);
 }
 
-// Main scraping job
-async function runScrapingJob() {
+// Main scraping job - accumulates data even if matches exist
+export async function runScrapingJob() {
 	// Check Redis lock first
 	const redisLocked = await isScrapingInProgress();
 	if (redisLocked || isRunning) {
@@ -29,7 +27,7 @@ async function runScrapingJob() {
 
 	isRunning = true;
 	await setScrapingLock(true);
-	console.log('Starting scheduled scraping job...');
+	console.log('Starting scraping job...');
 
 	try {
 		// Scrape investors (real-time, no mock data)
@@ -46,13 +44,12 @@ async function runScrapingJob() {
 		console.log('Extracting interests with AI...');
 		const interestsMap = await extractInterestsBatch(scrapedData);
 
-		// Get existing investors to check for duplicates
+		// Get existing investors
 		const existingInvestors = getAllInvestors();
-		const existingNameSourcePairs = new Set(
-			existingInvestors.map((inv) => `${inv.name.toLowerCase()}-${inv.source}`)
-		);
+		const existingInvestorsMap = new Map<string, Investor>();
+		existingInvestors.forEach((inv) => existingInvestorsMap.set(inv.id, inv));
 
-		// Convert to Investor format
+		// Convert to Investor format - always add/accumulate data
 		const now = new Date().toISOString();
 		const newInvestors: Investor[] = [];
 		let addedCount = 0;
@@ -60,31 +57,39 @@ async function runScrapingJob() {
 
 		scrapedData.forEach((data) => {
 			const interests = interestsMap.get(data.name)?.interests || [];
-			const nameSourceKey = `${data.name.toLowerCase()}-${data.source}`;
 			const id = generateId(data.name, data.source);
 
 			// Check if this investor already exists
-			const existingInvestor = existingInvestors.find((inv) => inv.id === id);
+			const existingInvestor = existingInvestorsMap.get(id);
 
 			if (existingInvestor) {
-				// Update existing investor with new data
+				// Merge/update existing investor with new data - accumulate information
 				const updatedInvestor: Investor = {
 					...existingInvestor,
-					bio: data.bio || existingInvestor.bio,
+					// Merge bio if new one is longer or more detailed
+					bio: (data.bio && (!existingInvestor.bio || data.bio.length > existingInvestor.bio.length)) 
+						? data.bio 
+						: existingInvestor.bio,
+					// Merge location if new one exists
 					location: data.location || existingInvestor.location,
-					interests: interests.length > 0 ? interests : existingInvestor.interests,
+					// Merge interests - combine unique interests
+					interests: interests.length > 0 
+						? [...new Set([...existingInvestor.interests, ...interests])]
+						: existingInvestor.interests,
+					// Merge contact info - prefer new data if available
 					contactInfo: {
 						email: data.contactInfo?.email || existingInvestor.contactInfo?.email,
 						linkedin: data.contactInfo?.linkedin || existingInvestor.contactInfo?.linkedin,
 						twitter: data.contactInfo?.twitter || existingInvestor.contactInfo?.twitter,
 						website: data.contactInfo?.website || existingInvestor.contactInfo?.website,
+						other: existingInvestor.contactInfo?.other || [],
 					},
 					lastUpdated: now,
 				};
 				newInvestors.push(updatedInvestor);
 				updatedCount++;
-			} else if (!existingNameSourcePairs.has(nameSourceKey)) {
-				// Add new investor
+			} else {
+				// Add new investor - always add even if name matches (different source)
 				const newInvestor: Investor = {
 					id,
 					name: data.name,
@@ -121,9 +126,11 @@ async function runScrapingJob() {
 		fs.writeFileSync(DB_PATH, JSON.stringify(allInvestors, null, 2));
 		console.log(`✓ Added ${addedCount} new investors, updated ${updatedCount} existing investors. Total: ${allInvestors.length}`);
 
-		// Invalidate Redis cache to force refresh
+		// Update Redis cache with all investors (no expiration)
 		await invalidateInvestorsCache();
-		console.log('✓ Cache invalidated');
+		// Re-cache the updated data
+		await setCachedInvestors(allInvestors);
+		console.log('✓ Cache updated');
 
 		console.log('Scraping job completed successfully');
 	} catch (error: any) {
@@ -132,28 +139,4 @@ async function runScrapingJob() {
 		isRunning = false;
 		await setScrapingLock(false);
 	}
-}
-
-// Start cron job (runs every 5 minutes)
-export function startScrapingScheduler() {
-	if (schedulerStarted) {
-		console.log('Scheduler already started');
-		return;
-	}
-
-	schedulerStarted = true;
-	console.log('Starting scraping scheduler (runs every 5 minutes)...');
-	
-	// Run immediately on startup
-	runScrapingJob().catch(console.error);
-
-	// Schedule to run every 5 minutes
-	cron.schedule('*/5 * * * *', () => {
-		runScrapingJob().catch(console.error);
-	});
-}
-
-// Manual trigger function
-export async function triggerScrapingJob() {
-	await runScrapingJob();
 }

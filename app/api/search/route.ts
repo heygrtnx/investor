@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { getAllInvestors } from '@/lib/db';
 import { getCachedInvestors, setCachedInvestors } from '@/lib/redis';
 import type { Investor } from '@/lib/db';
+import { runScrapingJob } from '@/lib/scraper-job';
 import OpenAI from 'openai';
 
 const openai = process.env.OPENAI_API_KEY
@@ -100,6 +101,12 @@ export async function GET(request: Request) {
 		if (!query) {
 			return NextResponse.json({ investors: [], error: 'No query provided' }, { status: 400 });
 		}
+
+		// Trigger scraping job in the background (non-blocking)
+		// This accumulates more investors to the database
+		runScrapingJob().catch((error) => {
+			console.error('Background scraping error:', error);
+		});
 
 		// Get all investors (from cache or database)
 		let allInvestors: Investor[] = [];

@@ -1,0 +1,16 @@
+<svg width="180" height="180" viewBox="0 0 180 180" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!-- Background with rounded corners -->
+  <rect width="180" height="180" rx="40" fill="#000000"/>
+  
+  <!-- Growth chart/graph line -->
+  <path d="M33.75 135 L56.25 112.5 L78.75 123.75 L101.25 78.75 L123.75 90" stroke="#FFFFFF" stroke-width="12" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+  
+  <!-- Connection nodes on the graph -->
+  <circle cx="56.25" cy="112.5" r="8" fill="#FFFFFF"/>
+  <circle cx="78.75" cy="123.75" r="8" fill="#FFFFFF"/>
+  <circle cx="101.25" cy="78.75" r="8" fill="#FFFFFF"/>
+  
+  <!-- Search/magnifying glass overlay representing "finder" -->
+  <circle cx="135" cy="45" r="20" stroke="#FFFFFF" stroke-width="8" fill="none"/>
+  <path d="M151.5 61.5 L168 78" stroke="#FFFFFF" stroke-width="8" stroke-linecap="round"/>
+</svg>

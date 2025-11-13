@@ -1,11 +1,12 @@
 import { SearchResults } from "@/components/search/search-results";
 
-export default function SearchPage({
+export default async function SearchPage({
 	searchParams,
 }: {
-	searchParams: { q?: string };
+	searchParams: Promise<{ q?: string }>;
 }) {
-	const query = searchParams.q || "";
+	const params = await searchParams;
+	const query = params.q || "";
 
 	return (
 		<div className="min-h-screen bg-gradient-to-br from-black via-gray-900 to-black dark:from-black dark:via-gray-950 dark:to-black">

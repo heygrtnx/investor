@@ -5,7 +5,6 @@ import { Toaster } from "sonner";
 import "./globals.css";
 import NextTopLoader from "nextjs-toploader";
 import { Header } from "@/components/reusables";
-import { SchedulerInit } from "@/components/investors/scheduler-init";
 
 export const metadata: Metadata = {
 	title: "AI Investor Finder | Find Perfect Angel Investors for Your Startup",
@@ -40,7 +39,6 @@ export default function RootLayout({
 						showSpinner={false}
 						easing="ease"
 					/>
-					<SchedulerInit />
 					{children}
 
 					<Toaster

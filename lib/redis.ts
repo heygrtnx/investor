@@ -79,9 +79,9 @@ const CACHE_KEYS = {
 } as const;
 
 // Cache TTL (Time To Live) in seconds
+// Note: investors cache never expires (no TTL)
 const CACHE_TTL = {
-	investors: 300, // 5 minutes
-	investor: 600, // 10 minutes
+	investor: 600, // 10 minutes (not used for main investors cache)
 	scrapeLock: 300, // 5 minutes
 } as const;
 
@@ -99,13 +99,14 @@ export async function getCachedInvestors<T>(): Promise<T | null> {
 	}
 }
 
-// Set cached investors
+// Set cached investors (never expires)
 export async function setCachedInvestors<T>(data: T): Promise<void> {
 	const client = getRedisClient();
 	if (!client) return;
 
 	try {
-		await client.setex(CACHE_KEYS.investors, CACHE_TTL.investors, JSON.stringify(data));
+		// Use SET without expiration - data never expires
+		await client.set(CACHE_KEYS.investors, JSON.stringify(data));
 	} catch (error: any) {
 		console.error('Error setting cached investors:', error.message);
 	}

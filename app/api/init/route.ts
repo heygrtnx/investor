@@ -1,13 +1,9 @@
 import { NextResponse } from 'next/server';
-import { startScrapingScheduler } from '@/lib/scraper-job';
-
-let schedulerStarted = false;
 
 export async function GET() {
-	if (!schedulerStarted) {
-		startScrapingScheduler();
-		schedulerStarted = true;
-		return NextResponse.json({ message: 'Scheduler started' });
-	}
-	return NextResponse.json({ message: 'Scheduler already running' });
+	// Scheduler removed - scraping now happens on-demand via search endpoint
+	return NextResponse.json({ 
+		message: 'Scheduler removed. Scraping now happens automatically on search.',
+		note: 'Use /api/search?q=query to trigger scraping'
+	});
 }
