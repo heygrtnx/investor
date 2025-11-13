@@ -166,36 +166,36 @@ export function SearchResults({ query }: SearchResultsProps) {
 	};
 
 	const handleUpdateInvestors = async () => {
-		if (investors.length === 0 || isUpdating) return;
+		if (!query || isUpdating) return;
 
 		setIsUpdating(true);
 		setUpdateMessage(null);
+		setProgress(null);
 
 		try {
-			const investorIds = investors.map((inv) => inv.id);
-			const response = await fetch("/api/investors/batch-update", {
-				method: "POST",
+			// Trigger a new search with the same query to fetch fresh records
+			// This will use the same progress tracking system
+			const response = await fetch(`/api/search?q=${encodeURIComponent(query)}`, {
+				method: "GET",
 				headers: {
 					"Content-Type": "application/json",
 				},
-				body: JSON.stringify({ investorIds }),
 			});
 
-			const result = await response.json();
-
-			if (response.ok && result.success) {
-				setUpdateMessage(result.message || `Successfully updated ${result.updated} investor${result.updated !== 1 ? "s" : ""}`);
-				// Refresh the data
-				mutate();
-				// Clear message after 5 seconds
+			if (response.ok) {
+				const result = await response.json();
+				// Refresh the data with new results
+				await mutate();
+				setUpdateMessage(`Successfully fetched ${result.investors?.length || 0} updated investor records`);
 				setTimeout(() => setUpdateMessage(null), 5000);
 			} else {
-				setUpdateMessage(result.error || "Failed to update investors");
+				const error = await response.json();
+				setUpdateMessage(error.error || "Failed to fetch updated investors");
 				setTimeout(() => setUpdateMessage(null), 5000);
 			}
 		} catch (error: any) {
 			console.error("Error updating investors:", error);
-			setUpdateMessage("Error updating investors. Please try again.");
+			setUpdateMessage("Error fetching updated investors. Please try again.");
 			setTimeout(() => setUpdateMessage(null), 5000);
 		} finally {
 			setIsUpdating(false);
@@ -204,7 +204,7 @@ export function SearchResults({ query }: SearchResultsProps) {
 
 	// Clear progress when loading completes
 	useEffect(() => {
-		if (!isLoading && investors.length > 0) {
+		if (!isLoading && !isUpdating && investors.length > 0) {
 			setTimeout(() => {
 				setIsLongRunning(false);
 				if (progressIntervalRef.current) {
@@ -214,7 +214,40 @@ export function SearchResults({ query }: SearchResultsProps) {
 				setProgress(null);
 			}, 300);
 		}
-	}, [isLoading, investors.length]);
+	}, [isLoading, isUpdating, investors.length]);
+
+	// Start progress polling when updating
+	useEffect(() => {
+		if (isUpdating && query) {
+			// Start progress polling
+			progressIntervalRef.current = setInterval(fetchProgress, 500);
+			
+			// Set timeout for long-running message
+			longRunningTimeoutRef.current = setTimeout(() => {
+				setIsLongRunning(true);
+				setProgress((prev) => {
+					if (!prev || prev.stage === "searching" || prev.stage === "discovering") {
+						return {
+							...prev,
+							stage: "compiling",
+							message: "Compiling results... this may take a while",
+							progress: prev?.progress || 50,
+						};
+					}
+					return prev;
+				});
+			}, 1000);
+
+			return () => {
+				if (progressIntervalRef.current) {
+					clearInterval(progressIntervalRef.current);
+				}
+				if (longRunningTimeoutRef.current) {
+					clearTimeout(longRunningTimeoutRef.current);
+				}
+			};
+		}
+	}, [isUpdating, query]);
 
 	const getProgressIcon = () => {
 		switch (progress?.stage) {
@@ -263,10 +296,10 @@ export function SearchResults({ query }: SearchResultsProps) {
 									</p>
 								</div>
 							</div>
-							{investors.length > 0 && !isLoading && (
+							{query && !isLoading && (
 								<Button
 									onClick={handleUpdateInvestors}
-									disabled={isUpdating}
+									disabled={isUpdating || isLoading}
 									startContent={
 										isUpdating ? (
 											<div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
@@ -275,7 +308,7 @@ export function SearchResults({ query }: SearchResultsProps) {
 										)
 									}
 									className="bg-white/10 hover:bg-white/20 text-white border border-white/20 backdrop-blur-xl disabled:opacity-50">
-									{isUpdating ? "Updating..." : `Update All (${investors.length})`}
+									{isUpdating ? "Fetching..." : "Fetch New Records"}
 								</Button>
 							)}
 						</div>
@@ -306,7 +339,7 @@ export function SearchResults({ query }: SearchResultsProps) {
 				</motion.div>
 
 				{/* Results */}
-				{isLoading ? (
+				{(isLoading || isUpdating) ? (
 					<div>
 						{/* Dynamic Progress Display */}
 						<AnimatePresence mode="wait">
